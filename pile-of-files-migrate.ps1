@@ -67,7 +67,7 @@ foreach ($companyFolder in $companyFolders) {
       if ($MatchedDocs -or $MatchedDocs.count -gt 0){
         if ($false -eq $updateOnMatch){
             $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
-            $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason }
+            $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason; Global=$IsGlobalKB; }
             continue
         } else {
             $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
@@ -131,7 +131,7 @@ foreach ($companyFolder in $companyFolders) {
         $upload = $upload.upload ?? $upload
       }
 
-      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Article'; result=$newDoc }
+      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Article'; result=$newDoc; Action=$(if ($null -ne $MatchedDocs){"Updated"} else {"Created"}); Global=$IsGlobalKB; }
 
     } catch {
       Write-Warning "Error processing '$($doc.FullName)': $($_.Exception.Message)"
@@ -141,7 +141,8 @@ foreach ($companyFolder in $companyFolders) {
   }
 }
 $logFile="$($workdir)\pile-of-files-$(Get-Date -Format 'yyyy-MM-dd_hh-mmtt').json"
-Write-Host "Completed Upload/Sync for $($completed.count) Articles; Writing detailed results to logfile: $logFile"
+Write-Host "Completed Upload/Sync for $($completed.count) Articles. Writing detailed results to logfile: $logFile"
+Write-Host "$($($completed.To | where-object {@("Error","Exception") -contains $_}).count) Total Exceptions or Errors encountered."
 $completed | convertto-json -depth 99 | out-file $logFile
 
 $huduapikey = $null
