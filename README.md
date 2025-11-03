@@ -36,6 +36,8 @@ TargetDocumentDir
 ```
 Each folder in `$TargetDocumentDir` corresponds to a company and each company folder is only searched one level deep (no nested folders for now), so just be mindful of your directory tree
 
+If you set a `$globalkbfoldername`, documents within this folder will be placed in Global/Central KB
+
 
 ### Getting Started - Environment File
 

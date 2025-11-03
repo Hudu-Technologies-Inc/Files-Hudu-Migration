@@ -1,11 +1,12 @@
+$UseAZVault = $false                                             # use AZ Keyvault if running noninteractively
+$AzVault_HuduSecretName = "HuduAPIKeySecretName"                 # Name of your secret in AZure Keystore for your Hudu API key
+$AzVault_Name           = "MyVaultName"                          # Name of your Azure Keyvault
 $HuduBaseUrl = "https://my-huduinstance.huducloud.com"
-$huduapikey = "my-hudu-apikey"
-$TargetDocumentDir = "c:\yourdocsfolder" # folder containing documents for Hudu KB articles
-$DocConversionTempDir = "c:\temporary"       # temp folder for file conversion
-$includeOriginals= $true        # upload original documents alongside converted counterparts
-$updateOnMatch = $false         # if article with same name exists, skip (false) or update (true)
-$globalkbfoldername = ""
-
+$TargetDocumentDir = "c:\yourdocsfolder"                         # folder containing documents for Hudu KB articles
+$DocConversionTempDir = "c:\temporary"                           # temp folder for file conversion
+$includeOriginals= $true                                         # upload original documents alongside converted counterparts
+$updateOnMatch = $false                                          # if article with same name exists, skip (false) or update (true)
+$globalkbfoldername = ""                                         # name of subdirectory in $TargetDocumentDir that contains global kb articles 
 
 
 # image formats that can be uploaded and referenced in Hudu KB articles
@@ -34,4 +35,17 @@ $DisallowedForConvert = [System.Collections.ArrayList]@(
     ".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",
     ".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm"
 )
+
+if ($true -eq $UseAZVault){
+    $huduapikey = $(read-host "Enter Hudu API Key")
+    clear-host
+} else {
+    if ($true -eq $UseAZVault) {
+    foreach ($module in @('Az.KeyVault')) {if (Get-Module -ListAvailable -Name $module) { Write-Host "Importing module, $module..."; Import-Module $module } else {Write-Host "Installing and importing module $module..."; Install-Module $module -Force -AllowClobber; Import-Module $module }}
+    if (-not (Get-AzContext)) { Connect-AzAccount };
+        $HuduAPIKey = "$(Get-AzKeyVaultSecret -VaultName "$AzVault_Name" -Name "$AzVault_HuduSecretName" -AsPlainText)"
+    }
+}
+
+
 . .\pile-of-files-migrate.ps1

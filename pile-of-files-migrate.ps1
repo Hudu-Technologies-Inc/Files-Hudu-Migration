@@ -126,7 +126,6 @@ foreach ($companyFolder in $companyFolders) {
         throw "Failed to create article for '$($doc.Name)'."
       }
 
-    # attach original document to article if user configured to do so
       if ($includeOriginals) {
         $upload = New-HuduUpload -Uploadable_Id $newDoc.id -Uploadable_Type 'Article' -FilePath $doc.FullName
         $upload = $upload.upload ?? $upload
@@ -144,3 +143,5 @@ foreach ($companyFolder in $companyFolders) {
 $logFile="$($workdir)\pile-of-files-$(Get-Date -Format 'yyyy-MM-dd_hh-mmtt').json"
 Write-Host "Completed Upload/Sync for $($completed.count) Articles; Writing detailed results to logfile: $logFile"
 $completed | convertto-json -depth 99 | out-file $logFile
+
+$huduapikey = $null
