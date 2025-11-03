@@ -1,9 +1,10 @@
 $HuduBaseUrl = "https://my-huduinstance.huducloud.com"
 $huduapikey = "my-hudu-apikey"
-$StartDir = "c:\yourdocsfolder" # folder containing documents for Hudu KB articles
-$tempDir = "c:\temporary"       # temp folder for file conversion
+$TargetDocumentDir = "c:\yourdocsfolder" # folder containing documents for Hudu KB articles
+$DocConversionTempDir = "c:\temporary"       # temp folder for file conversion
 $includeOriginals= $true        # upload original documents alongside converted counterparts
 $updateOnMatch = $false         # if article with same name exists, skip (false) or update (true)
+$globalkbfoldername = ""
 
 
 

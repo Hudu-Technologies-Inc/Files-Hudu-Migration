@@ -1,11 +1,12 @@
 # upload original documents alongside converted counterparts
 $includeOriginals=$includeOriginals ?? $true
-$StartDir = $StartDir ?? $(read-host "which directory contains documents")
+$TargetDocumentDir = $TargetDocumentDir ?? $(read-host "which directory contains documents")
 $EmbeddableImageExtensions = $EmbeddableImageExtensions ?? @(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp")
 $DisallowedForConvert = $DisallowedForConvert ?? [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
-$tempDir = $tempdir ?? "c:\conversion-tempdir"
+$DocConversionTempDir = $DocConversionTempDir ?? "c:\conversion-tempdir"
 $hudubaseurl = $hudubaseurl ?? $(read-host "Enter Hudu URL")
 $huduapikey = $huduapikey ?? $(read-host "Enter Hudu API Key")
+$globalkbfoldername = $globalkbfoldername ?? "$(get-random -Minimum 111111 -Maximum 999999)" # default to random value if not specified
 clear-host
 ## completed documents array for logging
 $completed = @()
@@ -15,16 +16,17 @@ foreach ($file in $(Get-ChildItem -Path ".\helpers" -Filter "*.ps1" -File | Sort
     Write-Host "Importing: $($file.Name)" -ForegroundColor DarkBlue
     . $file.FullName
 }
-Get-EnsuredPath -path $tempdir
+Get-EnsuredPath -path $DocConversionTempDir
 Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -baseurl $hudubaseurl -apikey $huduapikey; Get-HuduVersionCompatible;
 
-$companyFolders = Get-ChildItem -Path $StartDir -Depth 1 | where-object {$_.PSIsContainer -eq $true}
+$companyFolders = Get-ChildItem -Path $TargetDocumentDir -Depth 1 | where-object {$_.PSIsContainer -eq $true}
 $sofficePath=$(Get-LibreMSI -tmpfolder $tmpfolder)
 try {Stop-LibreOffice} catch {}
 $huduCompanies = Get-HuduCompanies
 foreach ($companyFolder in $companyFolders) {
-
+  $IsGlobalKB = $false
   $CompanyName = $companyFolder.Name.TrimEnd('\'); $CompanyName = "$("$($companyName)" -replace "__",'')".Trim();
+  $IsGlobalKB = $(Test-Equiv -A $CompanyName -B $globalkbfoldername)
 
   # find or create company
   $matchedCompany =
@@ -36,13 +38,15 @@ foreach ($companyFolder in $companyFolders) {
           $($(Get-Similarity -A $(Normalize-Text $_.name) -B $(Normalize-Text $companyName) -gt 0.975))
     } | Select-Object -First 1
   }
-  if (-not $matchedCompany) {
+  if (-not $matchedCompany -and $false -eq $IsGlobalKB) {
     Write-Host "No match for '$CompanyName'. Creating…"
     $created = New-HuduCompany -Name $CompanyName
     $matchedCompany = $created.company ?? $created
     # refresh cache
     $huduCompanies = Get-HuduCompanies
   }
+
+
   Write-Host "Starting '$CompanyName' (KB folder: $($companyFolder?.FullName)) — Hudu company id: $($matchedCompany.id)"
   $companyDocs = Get-HuduArticles -companyId $matchedCompany.id
 
@@ -74,13 +78,13 @@ foreach ($companyFolder in $companyFolders) {
       $newDoc = $null
 
       if ($isPdf) {
-    # conversion process - pdf
-        $newDoc = Set-HuduArticleFromPDF -PdfPath $doc.FullName -CompanyName $CompanyName -Title $originalName
+    # conversion process - pdf [convert to html and attach graphics]
+        $newDoc = Set-HuduArticleFromPDF -PdfPath $doc.FullName -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) -Title $originalName
         Write-Host "Hudu response:" ($newDoc | ConvertTo-Json -Depth 5)
         $newDoc = $newDoc.HuduArticle
       } elseif ($true -eq $shouldConvert) {
-    # conversion process - non-pdf
-            $outputDir = Join-Path $tempDir ([guid]::NewGuid().ToString())
+    # conversion process - non-pdf [but convertable]
+            $outputDir = Join-Path $DocConversionTempDir ([guid]::NewGuid().ToString())
             $null = New-Item -ItemType Directory -Path $outputDir -Force
 
             $localIn = Join-Path $outputDir $doc.Name
@@ -94,16 +98,25 @@ foreach ($companyFolder in $companyFolders) {
                 Select-Object -ExpandProperty FullName
 
             $newDoc = Set-HuduArticleFromHtml -ImagesArray ($images ?? @()) `
-                                            -CompanyName $CompanyName `
+                                            -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) `
                                             -Title $originalName `
-                                            -HtmlContents (Get-Content -Encoding utf8 -Raw $htmlPath) `
-                                            -CreateCompanyIfMissing
+                                            -HtmlContents (Get-Content -Encoding utf8 -Raw $htmlPath)
             $newDoc = $newDoc.HuduArticle
-    # standalone article-as-attachment process
+    # standalone article-as-attachment process [not pdf or convertable]
       } else {
-        $newDoc = $MatchedDocs ?? $(New-HuduArticle -name $originalName -companyId $matchedCompany.id -content "Attaching Upload"); $newdoc = $newdoc.article ?? $newdoc;
+        $newDoc = $MatchedDocs ?? 
+            $(if ($true -eq $IsGlobalKB) {
+                New-HuduArticle -name $originalName -content "Attaching Upload"
+            } else {
+                New-HuduArticle -name $originalName -companyId $matchedCompany.id -content "Attaching Upload"
+            })
+        $newdoc = $newdoc.article ?? $newdoc
         $upload = New-HuduUpload -Uploadable_Id $newdoc.id -Uploadable_Type 'Article' -FilePath $doc.FullName; $upload = $upload.upload ?? $upload;
-        $newDoc = Set-HuduArticle -id $newDoc.id -companyId $matchedCompany.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
+        $newDoc = if ($true -eq $IsGlobalKB) {
+            Set-HuduArticle -id $newDoc.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
+        } else {
+            Set-HuduArticle -id $newDoc.id -companyId $matchedCompany.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
+        }
         $completed += @{ company=$CompanyName; from=$doc.FullName; to='Company Upload'; result=($upload.upload ?? $upload) }
         continue
       }
