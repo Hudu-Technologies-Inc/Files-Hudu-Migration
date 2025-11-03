@@ -1,12 +1,11 @@
-# upload original documents alongside converted counterparts
-$includeOriginals= $true
-# if article with same name exists, skip (false) or update (true)
-$updateOnMatch = $false
+$HuduBaseUrl = "https://my-huduinstance.huducloud.com"
+$huduapikey = "my-hudu-apikey"
+$StartDir = "c:\yourdocsfolder" # folder containing documents for Hudu KB articles
+$tempDir = "c:\temporary"       # temp folder for file conversion
+$includeOriginals= $true        # upload original documents alongside converted counterparts
+$updateOnMatch = $false         # if article with same name exists, skip (false) or update (true)
 
-# folder containing documents for Hudu KB articles
-$StartDir = "c:\yourdocsfolder"
-# temp folder for file conversion
-$tempDir = "c:\temporary"
+
 
 # image formats that can be uploaded and referenced in Hudu KB articles
 $EmbeddableImageExtensions = @(
@@ -34,3 +33,4 @@ $DisallowedForConvert = [System.Collections.ArrayList]@(
     ".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",
     ".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm"
 )
+. .\pile-of-files-migrate.ps1

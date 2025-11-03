@@ -48,6 +48,7 @@ foreach ($companyFolder in $companyFolders) {
 
   foreach ($doc in (Get-ChildItem -LiteralPath $companyFolder.FullName -File -depth 1)) {
     # determine upload strategy from filename and whether article exists or not
+    
     try {
       $originalExt  = [IO.Path]::GetExtension($doc.Name).ToLowerInvariant()
       $originalName = [IO.Path]::GetFileNameWithoutExtension($doc.Name)
@@ -60,9 +61,14 @@ foreach ($companyFolder in $companyFolders) {
         (Test-Equiv -A $_.name -B $originalName) -or $(Compare-StringsIgnoring -A $_.name -B $originalName)
       }
       if ($MatchedDocs -or $MatchedDocs.count -gt 0){
-        $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
-        $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason }
-        continue
+        if ($false -eq $updateOnMatch){
+            $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
+            $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason }
+            continue
+        } else {
+            $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
+            Write-Host "Article $($MatchedDocs.Name) matched and set to be updated from $($doc.FullName)"
+        }
       }
 
       $newDoc = $null
@@ -92,10 +98,10 @@ foreach ($companyFolder in $companyFolders) {
                                             -Title $originalName `
                                             -HtmlContents (Get-Content -Encoding utf8 -Raw $htmlPath) `
                                             -CreateCompanyIfMissing
-        $newDoc = $newDoc.HuduArticle
+            $newDoc = $newDoc.HuduArticle
     # standalone article-as-attachment process
       } else {
-        $newDoc = New-HuduArticle -name $originalName -companyId $matchedCompany.id -content "Attaching Upload"; $newdoc = $newdoc.article ?? $newdoc;
+        $newDoc = $MatchedDocs ?? $(New-HuduArticle -name $originalName -companyId $matchedCompany.id -content "Attaching Upload"); $newdoc = $newdoc.article ?? $newdoc;
         $upload = New-HuduUpload -Uploadable_Id $newdoc.id -Uploadable_Type 'Article' -FilePath $doc.FullName; $upload = $upload.upload ?? $upload;
         $newDoc = Set-HuduArticle -id $newDoc.id -companyId $matchedCompany.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
         $completed += @{ company=$CompanyName; from=$doc.FullName; to='Company Upload'; result=($upload.upload ?? $upload) }

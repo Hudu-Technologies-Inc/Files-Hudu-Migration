@@ -100,7 +100,7 @@ function Set-HuduArticleFromHtml {
     [Parameter(Mandatory)][string]$HtmlContents,
     [switch]$CreateCompanyIfMissing = $true,
     [string]$HuduBaseUrl
-  )
+    )
 
   # 1) Resolve company (optional)
   $matchedCompany = $null
@@ -156,7 +156,11 @@ function Set-HuduArticleFromHtml {
   }
 
   # 3) Match or create article (company or global)
-  $allHududocuments = Get-HuduArticles
+  if ([string]::IsNullOrEmpty($CompanyName) -or $null -eq $matchedCompany){
+    $allHududocuments = Get-HuduArticles
+  } else {
+    $allHududocuments = Get-HuduArticles -companyId $matchedCompany.id
+  }
   $matchedDocument = if ($matchedCompany) {
     $allHududocuments | Where-Object { $_.company_id -eq $matchedCompany.id -and (Test-Equiv -A $_.name -B $Title) } | Select-Object -First 1
   } else {
