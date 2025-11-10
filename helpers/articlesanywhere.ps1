@@ -144,7 +144,7 @@ function Set-HuduArticleFromHtml {
         New-HuduUpload -FilePath $ImageFile -Uploadable_Id $matchedCompany.Id -Uploadable_Type 'Company'
       } else {
         # If your tenant supports KB-scoped uploads differently, adjust here:
-        New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Global'
+        New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Company' -Uploadable_Id $(get-huducompanies | select-object -first 1).Id
       }
       $uploaded = $uploaded.upload ?? $uploaded
     }

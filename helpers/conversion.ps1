@@ -1,3 +1,113 @@
+
+function New-HuduArticleFromLocalResource {
+  param (
+    [string]$resourceLocation,
+    [PSCustomObject]$company=$null,
+    [array]$companyDocs=$null
+  )
+  $IsGlobalKB = [bool]$($null -eq $company)
+  $companyDocs = $companyDocs ?? $(if ($true -eq $IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $company.id})
+
+
+
+
+    # determine upload strategy from filename and whether article exists or not
+    $isresourceFolder = $doc.PSIsContainer
+    if ($true -eq $isresourceFolder){
+      if ((Get-ChildItem -$doc -depth 1 -File).count -gt 0){
+          $articleResult = Set-HuduArticleFromResourceFolder -resourcesFolder $doc -companyName "$($company.name)"
+      }
+
+
+    }
+
+    try {
+      $originalExt  = [IO.Path]::GetExtension($doc.Name).ToLowerInvariant()
+      $originalName = [IO.Path]::GetFileNameWithoutExtension($doc.Name)
+      $isDisallowed = $DisallowedForConvert -contains $originalExt
+      $isPdf        = ($originalExt -eq '.pdf')
+      $shouldConvert = -not $isDisallowed
+      Write-Host "• $($doc.Name) — ext=$originalExt; disallowed=$isDisallowed; pdf=$isPdf; convert=$shouldConvert"
+      $MatchedDocs = $null
+      $MatchedDocs = $companyDocs | Where-Object {
+        (Test-Equiv -A $_.name -B $originalName) -or $(Compare-StringsIgnoring -A $_.name -B $originalName)
+      }
+      if ($MatchedDocs -or $MatchedDocs.count -gt 0){
+        if ($false -eq $updateOnMatch){
+            $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
+            $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason; Global=$IsGlobalKB; }
+            continue
+        } else {
+            $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
+            Write-Host "Article $($MatchedDocs.Name) matched and set to be updated from $($doc.FullName)"
+        }
+      }
+
+      $newDoc = $null
+
+      if ($isPdf) {
+    # conversion process - pdf [convert to html and attach graphics]
+        $newDoc = Set-HuduArticleFromPDF -PdfPath $doc.FullName -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) -Title $originalName
+        Write-Host "Hudu response:" ($newDoc | ConvertTo-Json -Depth 5)
+        $newDoc = $newDoc.HuduArticle
+      } elseif ($true -eq $shouldConvert) {
+    # conversion process - non-pdf [but convertable]
+            $outputDir = Join-Path $DocConversionTempDir ([guid]::NewGuid().ToString())
+            $null = New-Item -ItemType Directory -Path $outputDir -Force
+
+            $localIn = Join-Path $outputDir $doc.Name
+            Copy-Item -LiteralPath $doc.FullName -Destination $localIn -Force
+
+            $htmlPath = Convert-WithLibreOffice -InputFile $localIn `
+                                                -OutputDir $outputDir `
+                                                -SofficePath $sofficePath
+            $images = Get-ChildItem -LiteralPath $outputDir -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' } |
+                Select-Object -ExpandProperty FullName
+
+            $newDoc = Set-HuduArticleFromHtml -ImagesArray ($images ?? @()) `
+                                            -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) `
+                                            -Title $originalName `
+                                            -HtmlContents (Get-Content -Encoding utf8 -Raw $htmlPath)
+            $newDoc = $newDoc.HuduArticle
+    # standalone article-as-attachment process [not pdf or convertable]
+      } else {
+        $newDoc = $MatchedDocs ?? 
+            $(if ($true -eq $IsGlobalKB) {
+                New-HuduArticle -name $originalName -content "Attaching Upload"
+            } else {
+                New-HuduArticle -name $originalName -companyId $matchedCompany.id -content "Attaching Upload"
+            })
+        $newdoc = $newdoc.article ?? $newdoc
+        $upload = New-HuduUpload -Uploadable_Id $newdoc.id -Uploadable_Type 'Article' -FilePath $doc.FullName; $upload = $upload.upload ?? $upload;
+        $newDoc = if ($true -eq $IsGlobalKB) {
+            Set-HuduArticle -id $newDoc.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
+        } else {
+            Set-HuduArticle -id $newDoc.id -companyId $matchedCompany.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
+        }
+        $completed += @{ company=$CompanyName; from=$doc.FullName; to='Company Upload'; result=($upload.upload ?? $upload) }
+        continue
+      }
+
+      if ($null -eq $newDoc -or -not $newDoc.id) {
+          $completed += @{ company=$CompanyName; from=$doc.FullName; to='Exception'; error="New Document object $newdoc unexpectedly came back empty" }
+        throw "Failed to create article for '$($doc.Name)'."
+      }
+
+      if ($includeOriginals) {
+        $upload = New-HuduUpload -Uploadable_Id $newDoc.id -Uploadable_Type 'Article' -FilePath $doc.FullName
+        $upload = $upload.upload ?? $upload
+      }
+
+      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Article'; result=$newDoc; Action=$(if ($null -ne $MatchedDocs){"Updated"} else {"Created"}); Global=$IsGlobalKB; }
+
+    } catch {
+      Write-Warning "Error processing '$($doc.FullName)': $($_.Exception.Message)"
+      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Error'; error=$_.Exception.Message }
+      continue
+    }
+  }
+
 function Convert-WithLibreOffice {
     param (
         [string]$inputFile,
