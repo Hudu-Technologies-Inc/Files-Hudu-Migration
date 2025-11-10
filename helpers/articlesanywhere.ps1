@@ -136,6 +136,7 @@ function Set-HuduArticleFromHtml {
     }
   }
   if ($uploadResources -ne ""){
+    $uploadResources="<h2>Other Files</h2><ul><br>$uploadResources"
     $HtmlContents = $HtmlContents -replace '<h2>Other Files</h2><ul>',$uploadResources
   }
   $HuduImages = @()

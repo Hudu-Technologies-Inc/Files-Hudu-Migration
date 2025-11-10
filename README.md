@@ -19,24 +19,14 @@
 
 ### Getting Started - Target Folder/Files
 
-You'll want to prepare your target directory and files like so:
+If you have a target directory in mind, make sure that it is consistent and ready for migration.
+During startup, you'll be able to choose
 
-```
-TargetDocumentDir
-    company-name-1
-        annual-report.xlsx
-        note-from-diana.docx
-        deprovisioning-guide.pdf
-        user-provisioning-wizard.ps1
-    company-name-2
-        security-information.pdf
-        agent-install.exe
-        FLIR-cameras.txt
-        buildings-info.docx
-```
-Each folder in `$TargetDocumentDir` corresponds to a company and each company folder is only searched one level deep (no nested folders for now), so just be mindful of your directory tree
+$destinationStrategy - will all articles be matched to a single company? will each article need to be matched to various companies? or will all articles be designated as global kb?
 
-If you set a `$globalkbfoldername`, documents within this folder will be placed in Global/Central KB
+$sourceStrategy - search for article candidates recursively or at limited depth? 
+
+$sourceItemsCanBeFolders - can a folder be considered an article? directory listing or resource folder?
 
 
 ### Getting Started - Environment File

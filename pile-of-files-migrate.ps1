@@ -16,7 +16,7 @@ foreach ($file in $(Get-ChildItem -Path ".\helpers" -Filter "*.ps1" -File | Sort
 Get-EnsuredPath -path $DocConversionTempDir
 Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -baseurl $hudubaseurl -apikey $huduapikey; Get-HuduVersionCompatible;
 $sofficePath=$(Get-LibreMSI -tmpfolder $tmpfolder)
-try {Stop-LibreOffice} catch {}
+# try {Stop-LibreOffice} catch {}
 
 
 
