@@ -1,5 +1,7 @@
 # Pile of Files Sync/Migration
 
+*for now, this is just an internal basis /starting point for migrating authenticated webpages, directory listings, or any document into Hudu as an article*
+
 **Sync or Create Articles from Files to Hudu**
 
 ###### *PDFs, Word Documents, Zipfiles, come one, come all*
