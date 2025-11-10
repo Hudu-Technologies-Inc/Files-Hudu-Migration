@@ -1,83 +1,103 @@
 # upload original documents alongside converted counterparts
+$WorkDir = $PSScriptRoot
 $includeOriginals=$includeOriginals ?? $true
 $TargetDocumentDir = $TargetDocumentDir ?? $(read-host "which directory contains documents")
-$EmbeddableImageExtensions = $EmbeddableImageExtensions ?? @(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp")
-$DisallowedForConvert = $DisallowedForConvert ?? [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
+$EmbeddableImageExtensions = 
 $DocConversionTempDir = $DocConversionTempDir ?? "c:\conversion-tempdir"
 $hudubaseurl = $hudubaseurl ?? $(read-host "Enter Hudu URL")
 $huduapikey = $huduapikey ?? $(read-host "Enter Hudu API Key")
 $globalkbfoldername = $globalkbfoldername ?? "$(get-random -Minimum 111111 -Maximum 999999)" # default to random value if not specified
 clear-host
 ## completed documents array for logging
-$completed = @()
 ##
-$WorkDir = $PSScriptRoot
 foreach ($file in $(Get-ChildItem -Path ".\helpers" -Filter "*.ps1" -File | Sort-Object Name)) {
     Write-Host "Importing: $($file.Name)" -ForegroundColor DarkBlue
     . $file.FullName
 }
 Get-EnsuredPath -path $DocConversionTempDir
 Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -baseurl $hudubaseurl -apikey $huduapikey; Get-HuduVersionCompatible;
-
-$companyFolders = Get-ChildItem -Path $TargetDocumentDir -Depth 1 | where-object {$_.PSIsContainer -eq $true}
 $sofficePath=$(Get-LibreMSI -tmpfolder $tmpfolder)
 try {Stop-LibreOffice} catch {}
-$huduCompanies = Get-HuduCompanies
-foreach ($companyFolder in $companyFolders) {
-  $IsGlobalKB = $false
-  $CompanyName = $companyFolder.Name.TrimEnd('\'); $CompanyName = "$("$($companyName)" -replace "__",'')".Trim();
-  $IsGlobalKB = $(Test-Equiv -A $CompanyName -B $globalkbfoldername)
-
-  # find or create company
-  $matchedCompany =
-      $huduCompanies | Where-Object { $_.name -eq $CompanyName } | Select-Object -First 1
-  if (-not $matchedCompany) {
-    $matchedCompany = $huduCompanies | Where-Object {
-      (Test-Equiv -A $_.name -B $CompanyName) -or (Test-Equiv -A $_.nickname -B $CompanyName) -or `
-          $(Compare-StringsIgnoring -A $_.name -B $CompanyName) -or `
-          $($(Get-Similarity -A $(Normalize-Text $_.name) -B $(Normalize-Text $companyName) -gt 0.975))
-    } | Select-Object -First 1
-  }
-  if (-not $matchedCompany -and $false -eq $IsGlobalKB) {
-    Write-Host "No match for '$CompanyName'. Creating…"
-    $created = New-HuduCompany -Name $CompanyName
-    $matchedCompany = $created.company ?? $created
-    # refresh cache
-    $huduCompanies = Get-HuduCompanies
-  }
 
 
-  Write-Host "Starting '$CompanyName' (KB folder: $($companyFolder?.FullName)) — Hudu company id: $($matchedCompany.id)"
-  $companyDocs = Get-HuduArticles -companyId $matchedCompany.id
+function New-HuduArticleFromLocalResource {
+  param (
+    [string]$resourceLocation,
+    [string]$companyName=$null,
+    [array]$companyDocs=$null,
+    [bool]$updateOnMatch=$true,
+    [bool]$includeOriginals=$true,
+    [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
+    [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
+  )
+    $company = $null
+    if ([string]::IsNullOrEmpty($companyName)){
+      write-host "No company specified, assuming global kb."
+    } else {
+      $company = $(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies)) ?? $null
+    }
 
-  foreach ($doc in (Get-ChildItem -LiteralPath $companyFolder.FullName -File -depth 1)) {
-    # determine upload strategy from filename and whether article exists or not
-    
+    $IsGlobalKB = [bool]$($null -eq $company)
+    $companyDocs = $companyDocs ?? $(if ($true -eq $IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $company.id})
+    if (-not $(test-path $resourceLocation)){
+      Write-Error "resource location $resourceLocation does not appear to be a valid path"
+        return @{ company=$CompanyName; from=$doc.FullName; to="resource path specified $resourceLocation is not valid"; }
+    } else {write-host "user-supplied path seems to exist"}
+    $doc = Get-Item -LiteralPath $resourceLocation
+
+    if ($doc.PSIsContainer) {
+      Write-Host "user-supplied resource appears to be a directory. processing as such"
+      try {
+        $resourceFolderResult = if ($company) {
+          Set-HuduArticleFromResourceFolder -resourcesFolder $doc -companyName $company.name
+        } else {
+          Set-HuduArticleFromResourceFolder -resourcesFolder $doc
+        }
+        return @{ company=$company?.name; from=$doc.FullName; to=$resourceFolderResult }
+      } catch {
+        return @{ company=$company?.name; from=$doc.FullName; to="Error creating article from resource folder"; Exception=$_ }
+      }
+    } else {
+      write-host "user-supplied path appears to be a file. determining strategy for single-file"
+      $doc = $(Get-Item $resourceLocation)
+    }
+
     try {
       $originalExt  = [IO.Path]::GetExtension($doc.Name).ToLowerInvariant()
       $originalName = [IO.Path]::GetFileNameWithoutExtension($doc.Name)
       $isDisallowed = $DisallowedForConvert -contains $originalExt
       $isPdf        = ($originalExt -eq '.pdf')
+      $isImage      = $originalExt -in $EmbeddableImageExtensions
+
+
       $shouldConvert = -not $isDisallowed
       Write-Host "• $($doc.Name) — ext=$originalExt; disallowed=$isDisallowed; pdf=$isPdf; convert=$shouldConvert"
       $MatchedDocs = $null
-      $MatchedDocs = $companyDocs | Where-Object {
-        (Test-Equiv -A $_.name -B $originalName) -or $(Compare-StringsIgnoring -A $_.name -B $originalName)
-      }
-      if ($MatchedDocs -or $MatchedDocs.count -gt 0){
-        if ($false -eq $updateOnMatch){
-            $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
-            $completed += @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason; Global=$IsGlobalKB; }
-            continue
-        } else {
-            $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
-            Write-Host "Article $($MatchedDocs.Name) matched and set to be updated from $($doc.FullName)"
+      if (-not ([string]::IsNullOrEmpty($originalName)) -and $companyDocs -and $companyDocs.count -gt 0){
+        $MatchedDocs = $companyDocs | Where-Object {
+          (Test-Equiv -A $_.name -B $originalName) -or $(Compare-StringsIgnoring -A $_.name -B $originalName)
         }
-      }
+        if ($MatchedDocs -or $MatchedDocs.count -gt 0){
+          if ($false -eq $updateOnMatch){
+              $skipReason = "Skipped on basis of $originalName matched existing documents: $($MatchedDocs.name -join ', ')"
+              return @{ company=$CompanyName; from=$doc.FullName; to='Skipped'; Explain=$skipReason; Global=$IsGlobalKB; }
+              continue
+          } else {
+              $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
+              Write-Host "Article $($MatchedDocs.Name) matched and set to be updated from $($doc.FullName)"
+          }
+        }
+      } else {$MatchedDocs=$null}
 
       $newDoc = $null
-
-      if ($isPdf) {
+      if ($isImage) {
+        Write-Host "Processing as single-informatic image"
+        return $(Set-HuduArticleFromHtml `
+                    -ImagesArray @($doc.FullName) `
+                    -Title $originalName `
+                    -CompanyName $(if ($IsGlobalKB) { '' } else { $company.name }) `
+                    -HtmlContents "<img src='$($doc.Name)' alt='$originalName' />")
+      }  elseif ($isPdf) {
     # conversion process - pdf [convert to html and attach graphics]
         $newDoc = Set-HuduArticleFromPDF -PdfPath $doc.FullName -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) -Title $originalName
         Write-Host "Hudu response:" ($newDoc | ConvertTo-Json -Depth 5)
@@ -117,13 +137,12 @@ foreach ($companyFolder in $companyFolders) {
         } else {
             Set-HuduArticle -id $newDoc.id -companyId $matchedCompany.id -content "<a href='$($upload.url)'>See Attached Document, $($DOC.Name)</a>"
         }
-        $completed += @{ company=$CompanyName; from=$doc.FullName; to='Company Upload'; result=($upload.upload ?? $upload) }
-        continue
+        return @{ company=$CompanyName; from=$doc.FullName; to='Company Upload'; result=($upload.upload ?? $upload) }
       }
 
       if ($null -eq $newDoc -or -not $newDoc.id) {
           $completed += @{ company=$CompanyName; from=$doc.FullName; to='Exception'; error="New Document object $newdoc unexpectedly came back empty" }
-        throw "Failed to create article for '$($doc.Name)'."
+          return @{ company=$CompanyName; from=$doc.FullName; to='Error'; error="article was not created or updated" }
       }
 
       if ($includeOriginals) {
@@ -131,18 +150,10 @@ foreach ($companyFolder in $companyFolders) {
         $upload = $upload.upload ?? $upload
       }
 
-      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Article'; result=$newDoc; Action=$(if ($null -ne $MatchedDocs){"Updated"} else {"Created"}); Global=$IsGlobalKB; }
+      return @{ company=$CompanyName; from=$doc.FullName; to='Article'; result=$newDoc; Action=$(if ($null -ne $MatchedDocs){"Updated"} else {"Created"}); Global=$IsGlobalKB; }
 
     } catch {
       Write-Warning "Error processing '$($doc.FullName)': $($_.Exception.Message)"
-      $completed += @{ company=$CompanyName; from=$doc.FullName; to='Error'; error=$_.Exception.Message }
-      continue
+      return @{ company=$CompanyName; from=$doc.FullName; to='Error'; error=$_.Exception.Message }
     }
   }
-}
-$logFile="$($workdir)\pile-of-files-$(Get-Date -Format 'yyyy-MM-dd_hh-mmtt').json"
-Write-Host "Completed Upload/Sync for $($completed.count) Articles. Writing detailed results to logfile: $logFile"
-Write-Host "$($($completed.To | where-object {@("Error","Exception") -contains $_}).count) Total Exceptions or Errors encountered."
-$completed | convertto-json -depth 99 | out-file $logFile
-
-$huduapikey = $null

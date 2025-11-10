@@ -45,6 +45,7 @@ function Compare-StringsIgnoring {
 
     return ($normA -eq $normB)
 }
+
 function Get-Similarity {
     param([string]$A, [string]$B)
 
@@ -80,6 +81,19 @@ function Get-Similarity {
     $dist   = [double]$d[$n,$m]
     $maxLen = [double][Math]::Max($n,$m)
     return 1.0 - ($dist / $maxLen)
+}
+function Get-SimilaritySafe { param([string]$A,[string]$B)
+    if ([string]::IsNullOrWhiteSpace($A) -or [string]::IsNullOrWhiteSpace($B)) { return 0.0 }
+    $score = Get-Similarity $A $B
+    write-host "$a ... $b SCORED $score"
+    return $score
+}
+
+function ChoseBest-ByName {
+    param ([string]$Name,[array]$choices,[string]$prop='name')
+$validChoices = $choices | where-object {-not $([string]::IsNullOrEmpty($_.$prop))}
+return $($validChoices | ForEach-Object {
+[pscustomobject]@{Choice = $_; Score  = $(Get-SimilaritySafe -a "$Name" -b $_.$prop);}} | where-object {$_.Score -ge 0.97} | Sort-Object Score -Descending | select-object -First 1).Choice
 }
 function Export-DocPropertyJson {
     param (

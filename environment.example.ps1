@@ -38,7 +38,7 @@ $DisallowedForConvert = [System.Collections.ArrayList]@(
 
 if ($true -eq $UseAZVault){
     $huduapikey = $(read-host "Enter Hudu API Key")
-    clear-host
+    clear-host 
 } else {
     if ($true -eq $UseAZVault) {
     foreach ($module in @('Az.KeyVault')) {if (Get-Module -ListAvailable -Name $module) { Write-Host "Importing module, $module..."; Import-Module $module } else {Write-Host "Installing and importing module $module..."; Install-Module $module -Force -AllowClobber; Import-Module $module }}
