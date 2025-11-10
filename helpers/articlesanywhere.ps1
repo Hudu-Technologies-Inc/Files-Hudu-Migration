@@ -99,6 +99,7 @@ function Set-HuduArticleFromHtml {
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
     [switch]$CreateCompanyIfMissing = $true,
+    [array]$uploadsAsResources = @(),
     [string]$HuduBaseUrl
     )
 
@@ -125,7 +126,18 @@ function Set-HuduArticleFromHtml {
     Get-HuduUploads
   }
   $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-
+  $uploadsAsResources = @($uploadsAsResources) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+  $uploadResources = ""
+  foreach ($u in $uploadsAsResources) {
+    $u = New-HuduUpload -FilePath $u -Uploadable_Type 'Company' -Uploadable_Id $(get-huducompanies | select-object -first 1).Id
+    $upload = $u.upload ?? $u
+    if ($upload){
+      $uploadResources="$uploadResources<br><a href='$($upload.url)'>$($upload.name)</a>"
+    }
+  }
+  if ($uploadResources -ne ""){
+    $HtmlContents = $HtmlContents -replace '<h2>Other Files</h2><ul>',$uploadResources
+  }
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
@@ -720,12 +732,6 @@ function Set-HuduArticleFromResourceFolder {
 
     if ($other -and $other.Count -gt 0) {
       [void]$sb.AppendLine('<h2>Other Files</h2><ul>')
-      foreach ($p in $other) {
-        $leaf = [IO.Path]::GetFileName($p)
-        $txt  = [System.Web.HttpUtility]::HtmlEncode($leaf)
-        [void]$sb.AppendLine(('<li><a href="{0}">{1}</a></li>' -f $leaf,$txt))
-      }
-      [void]$sb.AppendLine('</ul>')
     }
 
     [void]$sb.AppendLine('</body></html>')
@@ -750,12 +756,22 @@ function Set-HuduArticleFromResourceFolder {
 
   Write-Verbose ("Scaffold complete: htmlLen={0}, images={1}, other={2}" -f ($html.Length), ($images?.Count ?? 0), ($other?.Count ?? 0))
 
-  $newDoc = Set-HuduArticleFromHtml `
-              -ImagesArray  ($images ?? @()) `
-              -CompanyName  $CompanyName `
-              -Title        $displayTitle `
-              -HtmlContents $html `
-              -HuduBaseUrl  (Get-HuduBaseURL)
+  if ($other -and $other.count -gt 0){
+    $newDoc = Set-HuduArticleFromHtml `
+                -ImagesArray  ($images ?? @()) `
+                -CompanyName  $CompanyName `
+                -Title        $displayTitle `
+                -HtmlContents $html `
+                -uploadsAsResources $other `
+                -HuduBaseUrl  (Get-HuduBaseURL)
+  } else {
+    $newDoc = Set-HuduArticleFromHtml `
+                -ImagesArray  ($images ?? @()) `
+                -CompanyName  $CompanyName `
+                -Title        $displayTitle `
+                -HtmlContents $html `
+                -HuduBaseUrl  (Get-HuduBaseURL)    
+  }
 
   return $newDoc
 }
