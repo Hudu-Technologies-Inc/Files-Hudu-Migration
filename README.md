@@ -32,6 +32,16 @@ foreach ($f in $(get-childitem c:\path -filter "*.pdf" -File -Recurse | where-ob
 Doing so will use pdftohtml to extract html/images from every found pdf, create a native article from html extracted from pdf, attach and relink images in pdf, then upload original pdf document as an attachment to the article. The extracted HTML is almost indistinguishable from the source pdf and can be edited, searched for, etc
 <img width="1224" height="448" alt="image" src="https://github.com/user-attachments/assets/e1298f57-0e3e-4903-8425-ccbcafd109a7" />
 
+##### Typical Office Formats
+
+similar to pdf documents, common (and even uncommon) document formats are converted to html and have any embedded images extracted during processing
+A docx file will look similar to the PDF example, above, but may have slightly more basic formatting for paragraphs and sections
+
+<img width="1301" height="496" alt="image" src="https://github.com/user-attachments/assets/edbf8e08-02d1-4fd7-8912-2d3fc3ea6dcc" />
+
+##### If directories-as-articles is enabled and your directory contains an .html file-
+it will process the article as the html article and any images therein as images to attache to article (and replace links/src for)
+
 
 --- 
 
