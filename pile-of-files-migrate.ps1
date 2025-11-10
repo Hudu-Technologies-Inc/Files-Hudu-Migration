@@ -17,48 +17,48 @@ Get-EnsuredPath -path $DocConversionTempDir
 Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -baseurl $hudubaseurl -apikey $huduapikey; Get-HuduVersionCompatible;
 $sofficePath=$(Get-LibreMSI -tmpfolder $tmpfolder)
 # try {Stop-LibreOffice} catch {}
+Write-Host "ready to use"
 
 
+# $destinationStrategy = $(select-objectfromlist -message "will each file be for a unique company?" -objects @("various companies","same company","global KB"))
+# $sourceStrategy = $(select-objectfromlist -message "do you want to look for source documents in $targetdocumentdir recursively?" -objects @("search recursively","only first-level"))
 
-$destinationStrategy = $(select-objectfromlist -message "will each file be for a unique company?" -objects @("various companies","same company","global KB"))
-$sourceStrategy = $(select-objectfromlist -message "do you want to look for source documents in $targetdocumentdir recursively?" -objects @("search recursively","only first-level"))
+# $sourceObjects = $(if ($sourceStrategy -eq "only first-level"){$(get-childitem -path $TargetDocumentDir -depth 0)} else {$(get-childitem -path $TargetDocumentDir -recurse)})
 
-$sourceObjects = $(if ($sourceStrategy -eq "only first-level"){$(get-childitem -path $TargetDocumentDir -depth 0)} else {$(get-childitem -path $TargetDocumentDir -recurse)})
+# $sourceItemsCanBeFolders = Select-ObjectFromList -Message "Include directories?" -Objects @(
+#     "directories included",
+#     "only process files"
+# )
 
-$sourceItemsCanBeFolders = Select-ObjectFromList -Message "Include directories?" -Objects @(
-    "directories included",
-    "only process files"
-)
+# if ($sourceItemsCanBeFolders -eq "only process files") {
+#     $sourceObjects = $sourceObjects | Where-Object { -not $_.PSIsContainer -and $_.Length -lt 100MB }
+# } else {
+#     $sourceObjects = $sourceObjects | Where-Object { $_.PSIsContainer -or $_.Length -lt 100MB }
+# }
 
-if ($sourceItemsCanBeFolders -eq "only process files") {
-    $sourceObjects = $sourceObjects | Where-Object { -not $_.PSIsContainer -and $_.Length -lt 100MB }
-} else {
-    $sourceObjects = $sourceObjects | Where-Object { $_.PSIsContainer -or $_.Length -lt 100MB }
-}
-
-if ('same company' -eq $destinationStrategy){
-  $sameCompanyTarget = select-objectfromlist -objects $(get-huducompanies) "Which company to attribute documents in $TargetDocumentDir to? Enter 0 for Global-KB."
-} else {
-  $sameCompanyTarget = $null
-}
-$results = @()
+# if ('same company' -eq $destinationStrategy){
+#   $sameCompanyTarget = select-objectfromlist -objects $(get-huducompanies) "Which company to attribute documents in $TargetDocumentDir to? Enter 0 for Global-KB."
+# } else {
+#   $sameCompanyTarget = $null
+# }
+# $results = @()
 
 
-foreach ($sourceObject in $sourceObjects){
-  $articleFromResourceRequest = @{
-    ResourceLocation = $(Get-Item -LiteralPath $sourceObject)
-  }
-  if ($destinationStrategy -eq "various companies") {
-    $target = $(select-objectfromlist -objects $(get-huducompanies) "Which company to attribute $($articleFromResourceRequest.ResourceLocation) to? Enter 0 for Global-KB.")
-    if ($target && $target.name){
-      $articleFromResourceRequest.companyName = $target.name
-    }
-  } elseif ('same company' -eq $destinationStrategy){
-    if ($null -ne $sameCompanyTarget -and $sameCompanyTarget.name){
-      $articleFromResourceRequest.companyName = $sameCompanyTarget.name
-    }
-  }
-  $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
-  $results+=$result
+# foreach ($sourceObject in $sourceObjects){
+#   $articleFromResourceRequest = @{
+#     ResourceLocation = $(Get-Item -LiteralPath $sourceObject)
+#   }
+#   if ($destinationStrategy -eq "various companies") {
+#     $target = $(select-objectfromlist -objects $(get-huducompanies) "Which company to attribute $($articleFromResourceRequest.ResourceLocation) to? Enter 0 for Global-KB.")
+#     if ($target && $target.name){
+#       $articleFromResourceRequest.companyName = $target.name
+#     }
+#   } elseif ('same company' -eq $destinationStrategy){
+#     if ($null -ne $sameCompanyTarget -and $sameCompanyTarget.name){
+#       $articleFromResourceRequest.companyName = $sameCompanyTarget.name
+#     }
+#   }
+#   $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+#   $results+=$result
 
-}
+# }
