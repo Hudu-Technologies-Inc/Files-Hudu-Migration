@@ -1,8 +1,9 @@
 # Pile of Files Sync/Migration
 
 *for now, this is just an internal basis /starting point for migrating authenticated webpages, directory listings, or any document into Hudu as an article*
+The 'articles anywhere' methods that this uses, however, are community-published and readily available.
 
-It's too much power to be weilded by users without more gaurdrails, however.
+It's too much power to be weilded by users without more gaurdrails, however. So, for now, it can just be a standardized basis for creating articles from a myriad of different source materials.
 
 **Sync or Create Articles from Files to Hudu**
 
@@ -41,6 +42,16 @@ A docx file will look similar to the PDF example, above, but may have slightly m
 
 ##### If directories-as-articles is enabled and your directory contains an .html file-
 it will process the article as the html article and any images therein as images to attache to article (and replace links/src for)
+
+##### Web URI / Link
+
+you can also capture webpages and set those as articles, even authenticated webpages.
+<img width="691" height="542" alt="image" src="https://github.com/user-attachments/assets/fd553a85-c1dd-4629-8943-8fe960f900bb" />
+
+Your mileage may vary without some pre-processing of html results, but essentially it just downloads the html, any image resources that can be downloaded, and treats it as a 'directory listing containing html file'
+
+<img width="901" height="704" alt="image" src="https://github.com/user-attachments/assets/40333c00-e1a4-4726-bffc-47a51625c072" />
+
 
 
 --- 
