@@ -5,7 +5,9 @@ The 'articles anywhere' methods that this uses, however, are community-published
 
 It's too much power to be weilded by users without more gaurdrails, however. So, for now, it can just be a standardized basis for creating articles from a myriad of different source materials.
 
-**Sync or Create Articles from Files to Hudu**
+###### A Word On Idemnopotence
+
+Articles are created/updated wth idemnopotence and any embedded images are reused. HOWEVER, directory listings will update the article of same-name with ALL NEW FILES. this can result in a lot of storage space being wasted. Better to download the resource, upload new resource if file hash has changed, and remvoe older resource. However, downloading the file in question does require session cookie / web authentication, so this is not built in (and part of the reason it maybe shouldnt be available to users). Otherwise, if they sync their C:\ drive 10x recursively, they might have 10 versions of every 1000 files that match their criteria
 
 ###### *PDFs, Word Documents, Zipfiles, come one, come all*
 
@@ -37,7 +39,7 @@ Doing so will use pdftohtml to extract html/images from every found pdf, create 
 
 It depends on the content of plaintext files, but most often their contents are read as a 'codeblock', with the original file as an attachment 
 
-<img width="513" height="827" alt="image" src="https://github.com/user-attachments/assets/04c922fe-f00d-41b3-bd65-c438e068d504" />
+<img width="1299" height="890" alt="image" src="https://github.com/user-attachments/assets/5b63485e-a7e3-4a0f-8c81-b7bf62131d72" />
 
 
 ##### Typical Office Formats
