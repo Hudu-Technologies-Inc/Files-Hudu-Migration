@@ -76,33 +76,4 @@ Your mileage may vary without some pre-processing of html results, but essential
 
 ---
 
-### Getting Started - Target Folder/Files
-
-If you have a target directory in mind, make sure that it is consistent and ready for migration.
-During startup, you'll be able to choose
-
-$destinationStrategy - will all articles be matched to a single company? will each article need to be matched to various companies? or will all articles be designated as global kb?
-
-$sourceStrategy - search for article candidates recursively or at limited depth? 
-
-$sourceItemsCanBeFolders - can a folder be considered an article? directory listing or resource folder?
-
-
-### Getting Started - Environment File
-
-Make a copy of Environment.example.ps1
-```
-copy-item environment.example.ps1  my-environment.ps1
-```
-Then edit the configuration / setup items
-
-```
-notepad.exe .\my-environment.ps1
-```
-
-Once you have your settings placed as desired, you can execute your environment file to kick things off [preferably via dot-sourcing]
-
-```
-. .\my-environment.ps1
-```
 
