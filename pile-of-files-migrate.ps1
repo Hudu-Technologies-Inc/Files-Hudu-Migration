@@ -31,9 +31,10 @@ $sourceItemsCanBeFolders = Select-ObjectFromList -Message "Include directories?"
 )
 
 if ($sourceItemsCanBeFolders -eq "only process files") {
-    $sourceObjects = $sourceObjects | Where-Object { -not $_.PSIsContainer }
-} 
-
+    $sourceObjects = $sourceObjects | Where-Object { -not $_.PSIsContainer -and $_.Length -lt 100MB }
+} else {
+    $sourceObjects = $sourceObjects | Where-Object { $_.PSIsContainer -or $_.Length -lt 100MB }
+}
 
 if ('same company' -eq $destinationStrategy){
   $sameCompanyTarget = select-objectfromlist -objects $(get-huducompanies) "Which company to attribute documents in $TargetDocumentDir to? Enter 0 for Global-KB."
