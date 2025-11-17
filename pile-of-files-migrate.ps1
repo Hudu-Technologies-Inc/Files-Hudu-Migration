@@ -164,6 +164,7 @@ process {
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
         . $file.FullName
     }
+    . .\files-config.ps1
 
     # Ensure temp dir
     Get-EnsuredPath -Path $DocConversionTempDir

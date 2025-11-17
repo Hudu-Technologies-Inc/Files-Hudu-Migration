@@ -8,6 +8,18 @@ It uses the **community-supported “articles anywhere” methods**, but this wr
 
 ---
 
+## Configuring File Types and Filters
+
+To configure any files that you wish to skip conversion for, upload as standalone documents, or image types to ignore, simply add/remove them to/from the respective list-
+
+`EmbeddableImageExtensions` - these are image files that can be loaded into Hudu inside articles. Chances are, you won't need to/want to fuss with these. You aren't likely to encounter some of the more exotic image formats here, but they do work, should you encounter them directly in a folder or subsequent to a file conversion.
+
+`DisallowedForConvert` These are common non-document extensions/formats that we will not try to convert to a READABLE Hudu Article. However, if we encounter these while working in a directory listing or a per-file basis, they can be uploaded to Hudu as an article attachment.
+
+If there is a specific format that you don't like to convert, like xlsx or xlsm, for example, you can add it to this array.
+
+`SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu.
+
 ## ⚠️ Important Note on Power & Guardrails
 This tool is extremely powerful:
 
