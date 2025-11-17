@@ -26,8 +26,13 @@ function New-DocImageMap([object[]]$HuduImages) {
     if (-not $orig -or -not $url) { continue }
     $leaf = Split-Path -Leaf $orig
     $base = [IO.Path]::GetFileNameWithoutExtension($leaf)
-    foreach ($k in @($leaf,$base,[uri]::EscapeDataString($leaf),[uri]::EscapeDataString($base))) {
-      if ($k -and -not $map.ContainsKey($k)) { $map[$k] = $url }
+    foreach ($k in @(
+        $leaf,
+        $base,
+        [uri]::EscapeDataString($leaf),
+        [uri]::EscapeDataString($base)
+    )) {
+        if ($k -and -not $map.ContainsKey($k)) { $map[$k] = $url }
     }
   }
   $map
@@ -90,7 +95,6 @@ function Rewrite-DocLinks {
   [pscustomobject]@{ Html=$html2; Rewrites=$rewrites; Unresolved=$unresolved }
 }
 
-# --- the single entry point you asked for ---
 function Set-HuduArticleFromHtml {
   [CmdletBinding()]
   param(
@@ -98,10 +102,9 @@ function Set-HuduArticleFromHtml {
     [string]$CompanyName = "",                     # optional → global KB if ''
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
-    [switch]$CreateCompanyIfMissing = $true,
-    [array]$uploadsAsResources = @(),
+    [switch]$CreateCompanyIfMissing = $false,
     [string]$HuduBaseUrl
-    )
+  )
 
   # 1) Resolve company (optional)
   $matchedCompany = $null
@@ -118,62 +121,8 @@ function Set-HuduArticleFromHtml {
       $matchedCompany = ($created.company ?? $created)
     }
   }
-
-  # 2) Idempotent uploads (company-scoped if company present; else global KB)
-  $existingRelatedImages = if ($matchedCompany) {
-    Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Company' -and $_.uploadable_id -eq $matchedCompany.Id }
-  } else {
-    Get-HuduUploads
-  }
-  $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-  $uploadsAsResources = @($uploadsAsResources) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-  $uploadResources = ""
-  foreach ($u in $uploadsAsResources) {
-    $u = New-HuduUpload -FilePath $u -Uploadable_Type 'Company' -Uploadable_Id $(get-huducompanies | select-object -first 1).Id
-    $upload = $u.upload ?? $u
-    if ($upload){
-      $uploadResources="$uploadResources<br><a href='$($upload.url)'>$($upload.name)</a>"
-    }
-  }
-  if ($uploadResources -ne ""){
-    $uploadResources="<h2>Other Files</h2><ul><br>$uploadResources"
-    $HtmlContents = $HtmlContents -replace '<h2>Other Files</h2><ul>',$uploadResources
-  }
-  $HuduImages = @()
-  foreach ($ImageFile in $ImagesArray) {
-    if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
-    $existingUpload = $null
-    $uploaded = $null
-    $imageFileName = ([IO.Path]::GetFileName($ImageFile)).Trim()
-
-    $existingUpload = $existingRelatedImages | Where-Object { $_.name -eq $imageFileName } | Select-Object -First 1
-    if (-not $existingUpload) {
-      $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A $_.name -B $imageFileName } | Select-Object -First 1
-    }
-    $existingUpload = $existingUpload.upload ?? $existingUpload
-
-    if (-not $existingUpload) {
-      $uploaded = if ($matchedCompany) {
-        New-HuduUpload -FilePath $ImageFile -Uploadable_Id $matchedCompany.Id -Uploadable_Type 'Company'
-      } else {
-        # If your tenant supports KB-scoped uploads differently, adjust here:
-        New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Company' -Uploadable_Id $(get-huducompanies | select-object -first 1).Id
-      }
-      $uploaded = $uploaded.upload ?? $uploaded
-    }
-
-    $usingImage = $existingUpload ?? $uploaded
-    if ($usingImage) {
-      $HuduImages += @{ OriginalFilename = $ImageFile; UsingImage = $usingImage }
-    }
-  }
-
-  # 3) Match or create article (company or global)
-  if ([string]::IsNullOrEmpty($CompanyName) -or $null -eq $matchedCompany){
-    $allHududocuments = Get-HuduArticles
-  } else {
-    $allHududocuments = Get-HuduArticles -companyId $matchedCompany.id
-  }
+  # 2. resolve or create article
+  $allHududocuments = Get-HuduArticles
   $matchedDocument = if ($matchedCompany) {
     $allHududocuments | Where-Object { $_.company_id -eq $matchedCompany.id -and (Test-Equiv -A $_.name -B $Title) } | Select-Object -First 1
   } else {
@@ -199,6 +148,38 @@ function Set-HuduArticleFromHtml {
   if (-not $articleUsed -or -not $articleUsed.id) {
     throw "Could not match or create article: '$Title' (Company: '$CompanyName')"
   }
+
+  # 2) Idempotent uploads (company-scoped if company present; else global KB)
+  $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.Id }
+
+  $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+
+  $HuduImages = @()
+  foreach ($ImageFile in $ImagesArray) {
+    if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
+    $existingUpload = $null
+    $uploaded = $null
+    $imageFileName = ([IO.Path]::GetFileName($ImageFile)).Trim()
+
+    $existingUpload = $existingRelatedImages | Where-Object { $_.name -eq $imageFileName } | Select-Object -First 1
+    if (-not $existingUpload) {
+      $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A $_.name -B $imageFileName } | Select-Object -First 1
+    }
+    $existingUpload = $existingUpload.upload ?? $existingUpload
+
+    if (-not $existingUpload) {
+        New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id
+        $uploaded = $uploaded.upload ?? $uploaded
+    }
+
+    $usingImage = $existingUpload ?? $uploaded
+    if ($usingImage) {
+      $HuduImages += @{ OriginalFilename = $ImageFile; UsingImage = $usingImage }
+    }
+  }
+
+  # 3) Match or create article (company or global)
+
 
   # 4) Build maps for rewriting
   $imageMap   = New-DocImageMap -HuduImages $HuduImages
@@ -615,14 +596,14 @@ function Set-HuduArticleFromPDF {
     [Parameter(Mandatory)][string]$PdfPath,
     [string]$CompanyName,
     [string]$Title,
-    [string]$pdftohtmlPath
+    [bool]$includeOriginal=$true # include original pdf attached to converted article
   )
 
   if (-not (Test-Path -LiteralPath $PdfPath -PathType Leaf)) { write-warning "NO PDF, $($PdfPath)"; return $null }
 
   $pdfBaseName = [IO.Path]::GetFileNameWithoutExtension($PdfPath)
 
-  $pdfData = Get-HTMLAndImagesArrayFromPDF -InputPdfPath $PdfPath -PdfToHtmlPath $pdftohtmlPath
+  $pdfData = Get-HTMLAndImagesArrayFromPDF -InputPdfPath $PdfPath
 
   $displayTitle = if ($Title) { $Title } else { $pdfBaseName }
 
@@ -632,6 +613,10 @@ function Set-HuduArticleFromPDF {
               -Title        $displayTitle `
               -HtmlContents $pdfData.Html `
               -HuduBaseUrl  (Get-HuduBaseURL)
+
+  if ($true -eq $includeOriginal){
+    New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $newDoc.HuduArticle.Id | Out-Null
+  }
 
   return $newDoc
 }
