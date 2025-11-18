@@ -19,7 +19,7 @@ It uses the **community-supported “articles anywhere” methods**, but this wr
 | LibreOffice | Latest MSI* |
 | Documents | ≤100 MB each |
 
-*If Libreoffice is not installed on your device yet, an installer will be launched for you.
+#### If Libreoffice is not installed on your device yet, an installer will be launched for you.
 ---
 
 ## Summary
