@@ -31,19 +31,13 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
 
-    # ---- GUARDRAILS / SAFETY LIMITS ----
-
     # Max number of items to process in one run (files + dirs, filtered)
     [Parameter(Mandatory = $false)]
     [int]$MaxItems = 500,
 
     # Max total bytes of all selected files combined
     [Parameter(Mandatory = $false)]
-    [long]$MaxTotalBytes = 2GB,
-
-    # Max size of any single item
-    [Parameter(Mandatory = $false)]
-    [long]$MaxItemBytes = 100MB,
+    [long]$MaxTotalBytes = 5GB,
 
     # Max recursion depth (only used if SourceStrategy = Recurse and PS supports -Depth)
     [Parameter(Mandatory = $false)]
@@ -66,7 +60,8 @@ param(
     if (-not $HuduApiKey) {$HuduApiKey = Read-Host "Enter Hudu API Key"; clear-host;}
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
     if (-not $SourceStrategy) {$SourceStrategy = Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")}
-    
+    [long]$MaxItemBytes = 100MB
+
     # check requested documents
     if ($SourceStrategy -eq 'TopLevel') {
         $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse:$false
@@ -106,24 +101,23 @@ param(
     if ($DestinationStrategy -eq 'SameCompany') {
         $sameCompanyTarget = Select-ObjectFromList `
             -Objects (Get-HuduCompanies) `
-            -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or cancel for Global KB."
+            -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
 
         if (-not $sameCompanyTarget) {
             Write-Host "No company selected; treating as Global KB." -ForegroundColor Yellow
             $DestinationStrategy = 'GlobalKB'
         }
     }
-
     $results = New-Object System.Collections.Generic.List[object]
-
-    # endregion destination company strategy
 
     # region: main processing loop
     foreach ($sourceObject in $sourceObjects) {
         try {
             $articleFromResourceRequest = @{
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
+                IncludeOriginals = ($IncludeOriginals ?? $true)
             }
+            if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
 
             switch ($DestinationStrategy) {
@@ -164,6 +158,8 @@ param(
     }
     # endregion main processing loop
 
-    Write-Host "Completed processing $($results.Count) items." -ForegroundColor Cyan
-    # You can also output $results for pipeline consumption
+    $resultsFile  = $(Join-Path $workdir -ChildPath "Files-Hudu-Migrate-$(Get-Date -Format 'yyyyMMdd-HHmmss').json")
+    Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
+    $results | ConvertTo-Json -depth 99 | Out-File -FilePath $resultsFile
+
     return $results
