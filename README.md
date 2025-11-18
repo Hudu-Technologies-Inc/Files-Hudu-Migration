@@ -9,6 +9,25 @@ It uses the **community-supported “articles anywhere” methods**, but this wr
 
 ---
 
+## Examples:
+
+#### Recursing Through a Path of various document types (Bulk File → Article)
+
+```powershell
+. .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Users\Administrator\Downloads\ -SourceStrategy Recurse
+```
+
+#### Specifying only Docx files in a SharePoint or OneDrive mount
+```powershell
+. .\pile-of-files-migrate.ps1 -TargetDocumentDir X:\Billing\ -SourceStrategy Recurse -Filter "*.docx"
+```
+
+#### Every folder has various documents for a given company. Upload documents and create single 'directory listing' of all files as an article
+```powershell
+. .\pile-of-files-migrate.ps1 -TargetDocumentDir Z:\Companies\ -SourceStrategy TopLevel -IncludeDirectories -DestinationStrategy 'VariousCompanies'
+```
+---
+
 ## Configuring File Types
 
 To configure any files that you wish to skip conversion for, upload as standalone documents, or image types to ignore, simply add/remove them to/from the respective list-
@@ -19,7 +38,7 @@ To configure any files that you wish to skip conversion for, upload as standalon
 
 If there is a specific format that you don't like to convert, like xlsx or xlsm, for example, you can add it to this array.
 
-`SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu.
+`SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu. There are some sane defaults in-place if you aren't sure.
 
 ---
 
@@ -44,25 +63,6 @@ If there is a specific format that you don't like to convert, like xlsx or xlsm,
 `MaxTotalBytes` - Max allowed total filesize for pre-converted documents/attachments. Default is 5gb
 
 `MaxDepth` - Max recursion depth (if using 'Recurse' for your `SourceStrategy`)- default is 5 levels of recursion
-
----
-
-## Supported Resource Types
-
-### 1. Directory Listing → Article
-If the provided resource is a **directory** containing at least one file under 100 MB:
-
-- Images are uploaded and displayed in a *gallery* section
-- Files are uploaded as attachments
-- Links are auto-generated to each item
-
----
-
-### 2. Recursing Through a Path (Bulk File → Article)
-
-```powershell
-. .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Users\Administrator\Downloads\ -SourceStrategy Recurse
-```
 
 ---
 
