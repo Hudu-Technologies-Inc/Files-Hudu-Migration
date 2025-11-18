@@ -48,6 +48,12 @@ This project serves as a **safe foundation** for:
 ```powershell
 . .\pile-of-files-migrate.ps1 -TargetDocumentDir Z:\Companies\ -SourceStrategy TopLevel -IncludeDirectories -DestinationStrategy 'VariousCompanies'
 ```
+
+#### Adding Articles for Critical PNG images on a Digital Camera
+```powershell
+. .\pile-of-files-migrate.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
+```
+
 ---
 
 ## Script Params / Options
