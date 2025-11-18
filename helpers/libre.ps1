@@ -1,3 +1,4 @@
+$LibreFullInstall="https://www.nic.funet.fi/pub/mirrors/documentfoundation.org/libreoffice/stable/25.8.0/win/x86_64/LibreOffice_25.8.0_Win_x86-64.msi"
 
 function Stop-LibreOffice {
     Get-Process | Where-Object { $_.Name -like "soffice*" } | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -8,7 +9,7 @@ function Get-LibreMSI {
     if (Test-Path "C:\Program Files\LibreOffice\program\soffice.exe") {
         return "C:\Program Files\LibreOffice\program\soffice.exe"
     }
-    $downloadUrl = "$LibreFullInstall"
+    $downloadUrl = $LibreFullInstall ?? "https://www.nic.funet.fi/pub/mirrors/documentfoundation.org/libreoffice/stable/25.8.0/win/x86_64/LibreOffice_25.8.0_Win_x86-64.msi"
     $downloadPath = Join-Path $tmpfolder "LibreOffice.msi"
 
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
