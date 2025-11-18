@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     # Root directory to scan for documents
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $true)]
     [string]$TargetDocumentDir,
 
     # Temporary working directory for conversions
     [Parameter(Mandatory = $false)]
     [string]$DocConversionTempDir,
+    [Parameter(Mandatory = $false)]
+    [string]$filter=$null,
 
     # Destination strategy:
     # - VariousCompanies: prompt per-file
@@ -86,6 +88,11 @@ param(
         $sourceObjects = $sourceObjects |
             Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
     }
+    if ($filter) {
+        Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
+        $sourceObjects = $sourceObjects | Where-Object { $_.Name -like "$filter" }
+    }
+
     if (-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
         return
     }    
