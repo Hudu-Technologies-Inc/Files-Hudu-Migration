@@ -26,5 +26,5 @@ $DisallowedForConvert = [System.Collections.ArrayList]@(
 )
 
 $SkipEntirely = [System.Collections.ArrayList]@(
-    ".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes", ".pdb"
+    ".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes"
 )

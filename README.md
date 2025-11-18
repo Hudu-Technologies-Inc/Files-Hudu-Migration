@@ -31,7 +31,6 @@ This tool is extremely powerful:
 
 Because of this, *default guardrails are in place* (file size caps, recursion limits, max item counts, safety prompts).
 
-This project is **not** intended for direct end-user use without additional UI, workflow limits, or policy logic.
 It serves as a *foundation* for safe, controlled migration and ingestion processes.
 
 ---
