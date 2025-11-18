@@ -88,7 +88,7 @@ param(
         $sourceObjects = $sourceObjects |
             Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
     }
-    if ($filter) {
+    if ($null -ne $filter) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
         $sourceObjects = $sourceObjects | Where-Object { $_.Name -like "$filter" }
     }
