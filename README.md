@@ -9,6 +9,28 @@ It uses the **community-supported “articles anywhere” methods**, but this wr
 
 ---
 
+## Requirements
+| Component | Required Version |
+|----------|------------------|
+| PowerShell | 7.5.1+ |
+| Hudu | 2.39.4+ |
+| Windows | Any |
+| Hudu API Key | — |
+| LibreOffice | Latest MSI* |
+| Documents | ≤100 MB each |
+
+*If Libreoffice is not installed on your device yet, an installer will be launched for you.
+---
+
+## Summary
+This project serves as a **safe foundation** for:
+
+- Large-scale document migration
+- Directory ingestion
+- File-to-article conversion
+
+---
+
 ## Examples:
 
 #### Recursing Through a Path of various document types (Bulk File → Article)
@@ -134,31 +156,4 @@ If there is a specific format that you don't like to convert, like xlsx or xlsm,
 
 `SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu. There are some sane defaults in-place if you aren't sure.
 
----
 
-## Requirements
-| Component | Required Version |
-|----------|------------------|
-| PowerShell | 7.5.1+ |
-| Hudu | 2.39.4+ |
-| Windows | Any |
-| Hudu API Key | — |
-| LibreOffice | Latest MSI |
-| Documents | ≤100 MB each |
-
----
-
-## Summary
-This project serves as a **safe foundation** for:
-
-- Large-scale document migration
-- Directory ingestion
-- File-to-article conversion
-- HTML normalization & relinking
-
-Guardrails prevent:
-
-- Recursion explosions
-- Upload storms
-- Storage blowouts
-- Redundant multi-sync loops
