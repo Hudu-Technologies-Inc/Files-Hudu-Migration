@@ -1,16 +1,15 @@
 
 # Pile of Files Sync / Migration
-*A standardized internal foundation for converting files, directories, and authenticated web resources into Hudu Articles.*
 
 This project provides a unified, highly-extensible workflow for generating Hudu articles from many different types of source material (directories, files, PDFs, Office docs, HTML pages, authenticated web content, etc.).
 
 It uses the **community-supported “articles anywhere” methods**, but this wrapper adds additional structure, pre-processing, extract/convert logic, and guardrails.
 
-You can even use it on remote filestores, sharepoint/onedrive mounts, just about anything you can access in Windows Explorer.
+*You can even use it on remote filestores, sharepoint/onedrive mounts, just about anything you can access in Windows Explorer.*
 
 ---
 
-## Configuring File Types and Filters
+## Configuring File Types
 
 To configure any files that you wish to skip conversion for, upload as standalone documents, or image types to ignore, simply add/remove them to/from the respective list-
 
@@ -22,39 +21,29 @@ If there is a specific format that you don't like to convert, like xlsx or xlsm,
 
 `SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu.
 
-## ⚠️ Important Note on Power & Guardrails
-This tool is extremely powerful:
-
-- It can recursively ingest large directory trees
-- Convert files in bulk
-- Capture authenticated web pages
-- Create hundreds or thousands of Hudu articles automatically
-- Attach extracted images, upload originals, and expand storage usage quickly
-
-Because of this, *default guardrails are in place* (file size caps, recursion limits, max item counts, safety prompts).
-
-It serves as a *foundation* for safe, controlled migration and ingestion processes.
-
 ---
 
-## Idempotence, Updates & Storage Considerations
-Articles are created or updated idempotently. Embedded images within converted documents are reused when possible.
+## Script Params / Options
 
-### ⚠️ Directory Listings Are *Not* Fully Idempotent
-If you sync a directory multiple times:
+`TargetDocumentDir` - This is the only required parameter - the directory where your desired articles are located
 
-- All new files will be re-uploaded
-- Old attachments will *not* be automatically removed
-- Storage will grow unnecessarily
+`DocConversionTempDir` - Temporary Directory for File Conversion (Pdf2Html and LibreOffice)
 
-### Why Not Automatically Remove Old Files?
-Because distinguishing “obsolete” vs. “intentionally retained” attachments requires:
+`filter` - Case-Insensitive File (or directory) naming filter [can use wildcards]. For example, to target just PDF files, you might specify `-filter "*.pdf"` or to specify directories starting with 'keep', you might specify `-filter "keep*"`
 
-- File hash comparison
-- Full download of server content
-- Authentication cookie / session-based download logic
+`DestinationStrategy` - This is for how you want to add articles to Hudu - If you want to upload all docs in Global/Central KB, you can specify `GlobalKb`. To add articles under a single company, specify `SameCompany`. Otherwise, you can specify `VariousCompanies`. This param is optional, so you will be prompted for destination info if not provided.
 
-This raises complexity and security implications—so it is not enabled by default.
+`SourceStrategy` - To allow for recursing into sub-directories when searching for resources, you can specify this with `-SourceStrategy Recurse`, otherwise to stay at a single level in your `TargetDocumentDir`, you can specify `-SourceStrategy Recurse` or omit this param and you will be prompted.
+
+`IncludeDirectories` - Whether or not to treat directories as a resource. Reccomended to be used WITHOUT a recursive source strategy. See below per-document examples for what this looks like.
+
+`IncludeOriginals` - Include original documents attached to articles, alongside converted counterparts? Default is true.
+
+`MaxItems` - Max allowed Files/Directories to handle at once. Default is 500. If your `TargetDocumentDir`, `SourceStrategy`, and/or `filter` results in more than this number of files, you will be prompted to continue or exit and refine your command.
+
+`MaxTotalBytes` - Max allowed total filesize for pre-converted documents/attachments. Default is 5gb
+
+`MaxDepth` - Max recursion depth (if using 'Recurse' for your `SourceStrategy`)- default is 5 levels of recursion
 
 ---
 
@@ -123,6 +112,27 @@ It depends on the content of plaintext files, but most often their contents are 
 
 ##### If directories-as-articles is enabled and your directory contains an .html file-
 it will process the article as the html article and any images therein as images to attache to article (and replace links/src for)
+
+---
+
+## Idempotence, Updates & Storage Considerations
+Articles are created or updated idempotently. Embedded images within converted documents are reused when possible.
+
+### ⚠️ Directory Listings Are *Not* Fully Idempotent
+If you sync a directory multiple times:
+
+- All new files will be re-uploaded
+- Old attachments will *not* be automatically removed
+- Storage will grow unnecessarily
+
+### Why Not Automatically Remove Old Files?
+Because distinguishing “obsolete” vs. “intentionally retained” attachments requires:
+
+- File hash comparison
+- Full download of server content
+- Authentication cookie / session-based download logic
+
+This raises complexity and security implications—so it is not enabled at present
 
 ---
 
