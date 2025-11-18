@@ -1,3 +1,60 @@
+    function Test-DocumentSetSafety {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [System.IO.FileSystemInfo[]]$Items,
+
+            [int]$MaxItems,
+            [long]$MaxTotalBytes,
+            [long]$MaxItemBytes
+        )
+
+        if (-not $Items -or $Items.Count -eq 0) {
+            Write-Warning "No source items found after filtering."
+            return $false
+        }
+
+        $files = $Items | Where-Object { -not $_.PSIsContainer }
+
+        $count       = $Items.Count
+        $fileCount   = $files.Count
+        $totalBytes  = ($files | Measure-Object Length -Sum).Sum
+        $largestItem = ($files  | Measure-Object Length -Maximum).Maximum
+
+        $tooMany      = $count      -gt $MaxItems
+        $tooLargeTotal= $totalBytes -gt $MaxTotalBytes
+        $tooLargeItem = $largestItem -gt $MaxItemBytes
+
+        Write-Host "Selected items: $count (files: $fileCount)" -ForegroundColor Cyan
+        Write-Host ("Total size   : {0:N0} bytes" -f $totalBytes) -ForegroundColor Cyan
+        Write-Host ("Largest item : {0:N0} bytes" -f $largestItem) -ForegroundColor Cyan
+
+        if (-not ($tooMany -or $tooLargeTotal -or $tooLargeItem)) {
+            return $true
+        }
+
+        Write-Warning "One or more safety limits were exceeded:"
+        if ($tooMany) {
+            Write-Warning " - Item count $count exceeds MaxItems $MaxItems"
+        }
+        if ($tooLargeTotal) {
+            Write-Warning (" - Total size {0:N0} exceeds MaxTotalBytes {1:N0}" -f $totalBytes, $MaxTotalBytes)
+        }
+        if ($tooLargeItem) {
+            Write-Warning (" - Largest item {0:N0} exceeds MaxItemBytes {1:N0}" -f $largestItem, $MaxItemBytes)
+        }
+
+
+        $answer = Read-Host "Type 'YES' to proceed anyway (anything else will abort)"
+        if ($answer -eq 'YES') {
+            Write-Warning "Proceeding despite safety warnings."
+            return $true
+        } else {
+            Write-Host "Aborting per user choice." -ForegroundColor Yellow
+            return $false
+        }
+    }
+
 function New-HuduArticleFromLocalResource {
   param (
     [string]$resourceLocation,
@@ -299,164 +356,6 @@ function Get-EmbeddedFilesFromHtml {
         
     $results.UpdatedHTMLContent = $htmlContent
     return $results
-}
-
-# TODO: DRY this up later.
-function ConvertDownloadedFiles {
-    param (
-        $downloadedFiles,
-        $sofficePath
-    )
-
-    $convertedbatch = [System.Collections.ArrayList]@()
-
-    $convertIDX=0
-    foreach ($file in $downloadedFiles) {
-        $convertIDX=$convertIDX+1
-        $completionPercentage = Get-PercentDone -Current $convertIDX -Total $downloadedFiles.count
-
-        if (-not $file.LocalPath) {
-            write-host "Skipping site-level reference object..." 
-            continue
-        }
-
-        $file | Add-Member -NotePropertyName SuccessConverted -NotePropertyValue $false -Force
-        $file | Add-Member -NotePropertyName NewPath -NotePropertyValue $null -Force
-        $file | Add-Member -NotePropertyName ConversionError -NotePropertyValue $null -Force
-
-        Write-Host -message "processing $($file.LocalPath)" 
-
-        try {
-            $extension = [System.IO.Path]::GetExtension($file.LocalPath).ToLowerInvariant()
-            Write-Host -Message "Checking extension '$extension'" 
-
-            $outputDir = Split-Path $file.LocalPath
-            $htmlPath = $null
-            # images as sharepoint file download
-            if ($EmbeddableImageExtensions -contains $extension){
-                Set-PrintAndLog -message "Image extension: $extension — generating user-friendly HTML." -Color Yellow
-                $file.NewPath = Join-Path $outputDir "$([System.IO.Path]::GetFileNameWithoutExtension($file.localpath))-gen-image.html"
-                Get-GeneratedHTMLForImageFile -sourceFile $file -outputFile $file.newpath
-                $file.RawContent = Get-Content $file.NewPath -Raw
-                $file.ReplacedContent = $file.RawContent
-                $file.SuccessConverted = $false
-                $file.UsingGeneratedHTML = $true
-                $file | Add-Member -NotePropertyName ExternalEmbeddedFiles -NotePropertyValue ([System.Collections.ArrayList]@()) -Force
-                $file | Add-Member -NotePropertyName Base64EmbeddedImages  -NotePropertyValue ([System.Collections.ArrayList]@()) -Force
-                $file | Add-Member -NotePropertyName AllAttachments -NotePropertyValue $(if ($RunSummary.SetupInfo.SourceFilesAsAttachments) {@($file.LocalPath)} else {[System.Collections.ArrayList]@()}) -Force
-                $convertedbatch.Add($file) | Out-Null
-                continue
-            }
-            # disallowed for conversion as sharepoint file download
-            if ($RunSummary.SetupInfo.DisallowedForConvert -contains $extension){
-                Set-PrintAndLog -message "extension: $extension is disallowed for converting— skipping conversion." -Color Yellow
-                $file.NewPath = Join-Path $outputDir "$([System.IO.Path]::GetFileNameWithoutExtension($file.localpath))-generated.html"
-                Get-DisallowedExtensionGeneratedHTML -sourceFile $file -outputFile $file.NewPath
-                $file.RawContent = Get-Content $file.NewPath -Raw
-                $file.ReplacedContent = $file.RawContent
-                $file.SuccessConverted = $false
-                $file.UsingGeneratedHTML = $true
-                $file | Add-Member -NotePropertyName ExternalEmbeddedFiles -NotePropertyValue ([System.Collections.ArrayList]@()) -Force
-                $file | Add-Member -NotePropertyName Base64EmbeddedImages  -NotePropertyValue ([System.Collections.ArrayList]@()) -Force
-                $file | Add-Member -NotePropertyName AllAttachments -NotePropertyValue $(if ($RunSummary.SetupInfo.SourceFilesAsAttachments) {@($file.LocalPath)} else {[System.Collections.ArrayList]@()}) -Force
-                $convertedbatch.Add($file) | Out-Null
-                continue    
-            }
-            switch ($extension) {
-                ".pdf" {
-                    $htmlPath = Convert-PdfToSlimHtml -InputPdfPath $file.localpath -PdfToHtmlPath $PDFToHTML
-                    # $htmlPath = Convert-PdfToHtml -inputPath $file.LocalPath `
-                    #                               -pdftohtmlPath $PDFToHTML `
-                    #                               -includeHiddenText $includeHiddenText `
-                    #                               -complexLayoutMode $includeComplexLayouts
-                }
-                default {
-                    $htmlPath = Convert-WithLibreOffice -inputFile $file.LocalPath `
-                                                  -outputDir $outputDir `
-                                                  -sofficePath $sofficePath
-                }
-            }
-
-            if ($htmlPath -and (Test-Path $htmlPath)) {
-                $file.NewPath = $htmlPath
-                $file.RawContent = Get-Content $file.NewPath -Raw
-
-                $file.SuccessConverted = $true
-                Set-PrintAndLog -message "Converted: $($file.LocalPath) => $htmlPath" -Color Green
-                Set-PrintAndLog -message "Discovering Embedded Files for $htmlPath" -Color DarkGreen
-
-                $foundfiles = Get-EmbeddedFilesFromHtml -htmlPath $htmlPath
-                $totalFound = [int]$foundfiles.Base64Images.Count + [int]$foundfiles.ExternalFiles.Count
-                Set-PrintAndLog -message "Found $totalFound ($($foundfiles.ExternalFiles.count) extracted / $($foundfiles.Base64Images.count) embedded) inside converted $htmlpath" -Color DarkMagenta
-                if ($foundfiles.UpdatedHTMLContent) {
-                    $file.ReplacedContent = "$($foundfiles.UpdatedHTMLContent)<br>$($SHAREPOINT_URL_DELIMITER)<br>$($HUDU_LOCALATTACHMENT_DELIMITER)"
-                }
-                $file | Add-Member -NotePropertyName ExternalFiles -NotePropertyValue $foundfiles.ExternalFiles -Force
-                $file | Add-Member -NotePropertyName Base64ImagesWritten  -NotePropertyValue $foundfiles.Base64ImagesWritten  -Force
-                $allfiles=@() 
-                if ($RunSummary.SetupInfo.SourceFilesAsAttachments) {
-                    $allFiles = @(@($file.ExternalFiles) + @($file.Base64ImagesWritten) + @($file.LocalPath)) | Sort-Object -Unique
-                } else {
-                    $allFiles = @(@($file.ExternalFiles) + @($file.Base64ImagesWritten)) | Sort-Object -Unique
-                }
-                $file | Add-Member -NotePropertyName AllAttachments -NotePropertyValue $allFiles -Force
-
-            }
-        } catch {
-            $file.ConversionError = $_.Exception.Message
-            $file.SuccessConverted = $false
-            Write-ErrorObjectsToFile -ErrorObject @{
-                FileObject = $file
-                FoundEmbeds = $foundFiles
-                HtmlPath   = $htmlPath
-            } -Name "converterror-$(Get-SafeTitle $($file.LocalPath))"
-            continue
-        }
-        $convertedbatch.Add($file) | Out-Null
-        Write-Progress -Activity "converting $($file.title)" -Status "$completionPercentage%" -PercentComplete $completionPercentage
-
-    }
-
-    return $convertedbatch
-}
-
-function Convert-PdfToSlimHtml {
-    param (
-        [Parameter(Mandatory)][string]$InputPdfPath,
-        [string]$OutputDir = (Split-Path -Path $InputPdfPath),
-        [string]$PdfToHtmlPath = "C:\tools\poppler\bin\pdftohtml.exe"
-    )
-
-    if (-not (Test-Path $InputPdfPath)) {
-        throw "PDF not found: $InputPdfPath"
-    }
-
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($InputPdfPath)
-    $xmlOutput = Join-Path $OutputDir "$baseName.xml"
-    $htmlOutput = Join-Path $OutputDir "$baseName.slim.html"
-
-    $args = @(
-        # "-xml"            # XML format
-        "-p"              # Extract images
-        "-zoom", "1.0"    # No zoom distortion
-        "-noframes"       # Single output file
-        "-nomerge"        # Keep layout simple
-        "-enc", "UTF-8"
-        "-nodrm"
-        "`"$InputPdfPath`"",
-        "`"$htmlOutput`""
-    )
-
-    # # Run conversion to XML
-    Start-Process -FilePath $PdfToHtmlPath -ArgumentList $args -NoNewWindow -Wait
-
-    # if (-not (Test-Path $xmlOutput)) {
-    #     throw "XML output was not created."
-    # }
-
-    # Convert XML to lightweight HTML
-    # Convert-PdfXmlToHtml -XmlPath $xmlOutput -OutputHtmlPath $htmlOutput
-    return $htmlOutput
 }
 
 function Convert-PdfXmlToHtml {
