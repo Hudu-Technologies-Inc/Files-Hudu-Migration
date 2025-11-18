@@ -6,6 +6,8 @@ This project provides a unified, highly-extensible workflow for generating Hudu 
 
 It uses the **community-supported “articles anywhere” methods**, but this wrapper adds additional structure, pre-processing, extract/convert logic, and guardrails.
 
+You can even use it on remote filestores, sharepoint/onedrive mounts, just about anything you can access in Windows Explorer.
+
 ---
 
 ## Configuring File Types and Filters
@@ -24,7 +26,7 @@ If there is a specific format that you don't like to convert, like xlsx or xlsm,
 This tool is extremely powerful:
 
 - It can recursively ingest large directory trees
-- Convert files in bulkx
+- Convert files in bulk
 - Capture authenticated web pages
 - Create hundreds or thousands of Hudu articles automatically
 - Attach extracted images, upload originals, and expand storage usage quickly
@@ -69,29 +71,58 @@ If the provided resource is a **directory** containing at least one file under 1
 
 ### 2. Recursing Through a Path (Bulk File → Article)
 
+```powershell
+. .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Users\Administrator\Downloads\ -SourceStrategy Recurse
+```
 
 ---
 
-### 3. Office Documents (docx, pptx, xlsx)
-Non-PDF documents go through LibreOffice conversion.
+## Document Conversion and Resulting Types of Articles
 
----
+It all comes down to specified resource... We'll iterate through the specified resource if it's a directory and handle every file or directory in the best way possible. 
 
-### 4. Plaintext Files & Scripts
-Rendered as:
+### Directory Listing article
+Requirement - *the specified resource is a directory containing at least one file under 100mb*
 
-- Syntax-highlighted code
-- Original file uploaded as attachment
+if directory is provided as a resource, any images in directory are uploaded and placed into a 'gallery' section, each linked to the upload object in Hudu.
 
----
+Any non-image items within directory resource are uploaded (if under 100mb) and also linked in a section, below
+<img width="617" height="971" alt="image" src="https://github.com/user-attachments/assets/38335c2f-fc6d-4f41-b8b3-84ce5f6d938b" />
 
-### 5. Directories Containing HTML Files
-If a directory contains an `.html` file, that becomes the article body.
+If chosen directory does not include images, you just get an article with a link to attached files
+<img width="921" height="244" alt="image" src="https://github.com/user-attachments/assets/2c86a1f6-b6ef-4a9a-8f37-5e6b428f1b5d" />
 
----
+To enable Directory Listing option, you can include the `-IncludeDirectories` switch in your command. Be wary of using this in conjunction with -Recurse param, as you might get more than you bargained for. Best to use these in a mutually-exclusive manner.
 
-### 6. Web URI / Link → Article
-HTML is downloaded, images fetched if possible, and converted as an HTML-based article.
+### PDF Format
+
+If you wanted to upload all eligible .pdf documents in c:\path to a single company, for example, you might do something like this, below.
+```
+ . .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Path\ -SourceStrategy Recurse -Filter "*.pdf"
+```
+
+Doing so will use pdftohtml to extract html/images from every found pdf, create a native article from html extracted from pdf, attach and relink images in pdf, then upload original pdf document as an attachment to the article. The extracted HTML is almost indistinguishable from the source pdf and can be edited, searched for, etc.
+
+<img width="1224" height="448" alt="image" src="https://github.com/user-attachments/assets/e1298f57-0e3e-4903-8425-ccbcafd109a7" />
+
+### Typical Office Formats
+
+similar to pdf documents, common (and even uncommon) document formats are converted to html and have any embedded images extracted during processing
+A docx file will look similar to the PDF example, above, but may have slightly more basic formatting for paragraphs and sections
+
+<img width="1301" height="496" alt="image" src="https://github.com/user-attachments/assets/edbf8e08-02d1-4fd7-8912-2d3fc3ea6dcc" />
+Excel and CSV files are converted into an HTML table
+
+
+### Plaintext files and Scripts
+
+It depends on the content of plaintext files, but most often their contents are read as a 'codeblock', with the original file as an attachment 
+
+<img width="1299" height="890" alt="image" src="https://github.com/user-attachments/assets/5b63485e-a7e3-4a0f-8c81-b7bf62131d72" />
+
+
+##### If directories-as-articles is enabled and your directory contains an .html file-
+it will process the article as the html article and any images therein as images to attache to article (and replace links/src for)
 
 ---
 
