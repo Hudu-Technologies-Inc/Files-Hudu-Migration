@@ -43,7 +43,10 @@ param(
 
     # Max recursion depth (only used if SourceStrategy = Recurse and PS supports -Depth)
     [Parameter(Mandatory = $false)]
-    [int]$MaxDepth = 5
+    [int]$MaxDepth = 5,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$PersistTempfiles = $false
 )
     $WorkDir = $PSScriptRoot
     # Load helper scripts
@@ -65,6 +68,11 @@ param(
     [long]$MaxItemBytes = 100MB
 
     # check requested documents
+    Write-Host "Discovering source documents with strategy $($SourceStrategy)..." -ForegroundColor Cyan    
+    if ($IncludeDirectories.IsPresent -and $SourceStrategy -ne 'TopLevel') {
+        $SourceStrategy = 'TopLevel'; Write-Host "Directories will be included, however recursion is limited to TopLevel when including directories." -ForegroundColor Yellow;
+    }    
+    
     if ($SourceStrategy -eq 'TopLevel') {
         $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse:$false
     } else {
@@ -81,6 +89,7 @@ param(
         if ($SkipEntirely -contains $_.Extension.ToLower()) {return $false}
         return $true
     }
+
     if ($IncludeDirectories.IsPresent) {
         $sourceObjects = $sourceObjects |
             Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) }
@@ -90,10 +99,11 @@ param(
     }
     if ($null -ne $filter) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
-        $sourceObjects = $sourceObjects | Where-Object { $_.Name -like "$filter" }
+        $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
     }
 
-    if (-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
+    if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
+        Write-Warning "Not enough viable source objects in your target directory after filtering; aborting."
         return
     }    
 
@@ -101,7 +111,7 @@ param(
     Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -BaseUrl $HuduBaseUrl -ApiKey $HuduApiKey; Get-HuduVersionCompatible;
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
-    Write-Host "Discovering source documents..." -ForegroundColor Cyan
+
 
     # region: destination company strategy
     $sameCompanyTarget = $null
@@ -163,10 +173,15 @@ param(
             })
         }
     }
-    # endregion main processing loop
 
     $resultsFile  = $(Join-Path $workdir -ChildPath "Files-Hudu-Migrate-$(Get-Date -Format 'yyyyMMdd-HHmmss').json")
     Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
     $results | ConvertTo-Json -depth 99 | Out-File -FilePath $resultsFile
+    if ($true -eq $PersistTempfiles) {
+        Write-Host "Temporary files have been preserved at $DocConversionTempDir" -ForegroundColor Yellow
+    } else {
+        Write-Host "Cleaning up temporary files at $DocConversionTempDir" -ForegroundColor DarkGray
+        Remove-Item -LiteralPath $DocConversionTempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     return $results
