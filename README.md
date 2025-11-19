@@ -1,5 +1,5 @@
 
-# Pile of Files Sync / Migration
+# Files → Hudu Migration Sync / Migration
 
 This project provides a unified, highly-extensible workflow for generating Hudu articles from many different types of source material (directories, files, PDFs, Office docs, HTML pages, authenticated web content, etc.).
 
@@ -36,22 +36,22 @@ This project serves as a **safe foundation** for:
 #### Recursing Through a Path of various document types (Bulk File → Article)
 
 ```powershell
-. .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Users\Administrator\Downloads\ -SourceStrategy Recurse
+. .\Files-For-Hudu.ps1 -TargetDocumentDir C:\Users\Administrator\Downloads\ -SourceStrategy Recurse
 ```
 
 #### Specifying only Docx files in a SharePoint or OneDrive mount
 ```powershell
-. .\pile-of-files-migrate.ps1 -TargetDocumentDir X:\Billing\ -SourceStrategy Recurse -Filter "*.docx"
+. .\Files-For-Hudu.ps1 -TargetDocumentDir X:\Billing\ -SourceStrategy Recurse -Filter "*.docx"
 ```
 
 #### Every folder has various documents for a given company. Upload documents and create single 'directory listing' of all files as an article
 ```powershell
-. .\pile-of-files-migrate.ps1 -TargetDocumentDir Z:\Companies\ -SourceStrategy TopLevel -IncludeDirectories -DestinationStrategy 'VariousCompanies'
+. .\Files-For-Hudu.ps1 -TargetDocumentDir Z:\Companies\ -SourceStrategy TopLevel -IncludeDirectories -DestinationStrategy 'VariousCompanies'
 ```
 
 #### Adding Articles for Critical PNG images on a Digital Camera
 ```powershell
-. .\pile-of-files-migrate.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
+. .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
 ```
 
 ---
@@ -101,7 +101,7 @@ To enable Directory Listing option, you can include the `-IncludeDirectories` sw
 
 If you wanted to upload all eligible .pdf documents in c:\path to a single company, for example, you might do something like this, below.
 ```
- . .\pile-of-files-migrate.ps1 -TargetDocumentDir C:\Path\ -SourceStrategy Recurse -Filter "*.pdf"
+ . .\Files-For-Hudu.ps1 -TargetDocumentDir C:\Path\ -SourceStrategy Recurse -Filter "*.pdf"
 ```
 
 Doing so will use pdftohtml to extract html/images from every found pdf, create a native article from html extracted from pdf, attach and relink images in pdf, then upload original pdf document as an attachment to the article. The extracted HTML is almost indistinguishable from the source pdf and can be edited, searched for, etc.
