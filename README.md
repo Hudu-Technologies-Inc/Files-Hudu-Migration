@@ -1,5 +1,5 @@
 
-# Files → Hudu Migration Sync / Migration
+# Files → Hudu Articles Sync / Migration
 
 This project provides a unified, highly-extensible workflow for generating Hudu articles from many different types of source material (directories, files, PDFs, Office docs, HTML pages, authenticated web content, etc.).
 
