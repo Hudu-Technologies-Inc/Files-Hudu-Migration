@@ -31,6 +31,23 @@ This project serves as a **safe foundation** for:
 
 ---
 
+## Script Parameters
+
+| Parameter | Description |
+|----------|-------------|
+| **TargetDocumentDir** *(required)* | Directory containing the articles to process. |
+| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. |
+| **filter** | Case-insensitive file or directory filter. Supports wildcards (e.g., `*.pdf`, `keep*`). |
+| **DestinationStrategy** | Determines how articles are added to Hudu: `GlobalKb`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
+| **SourceStrategy** | Controls recursion: use `Recurse` to search subdirectories; omit to stay at a single level (will prompt if missing). |
+| **IncludeDirectories** | Whether to treat directories as a resource. Recommended when *not* using recursive source strategy. |
+| **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
+| **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
+| **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
+| **MaxDepth** | Maximum recursion depth when using `Recurse`. Default: **5** levels. |
+
+---
+
 ## Examples:
 
 #### Recursing Through a Path of various document types (Bulk File → Article)
@@ -53,30 +70,6 @@ This project serves as a **safe foundation** for:
 ```powershell
 . .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
 ```
-
----
-
-## Script Params / Options
-
-`TargetDocumentDir` - This is the only required parameter - the directory where your desired articles are located
-
-`DocConversionTempDir` - Temporary Directory for File Conversion (Pdf2Html and LibreOffice)
-
-`filter` - Case-Insensitive File (or directory) naming filter [can use wildcards]. For example, to target just PDF files, you might specify `-filter "*.pdf"` or to specify directories starting with 'keep', you might specify `-filter "keep*"`
-
-`DestinationStrategy` - This is for how you want to add articles to Hudu - If you want to upload all docs in Global/Central KB, you can specify `GlobalKb`. To add articles under a single company, specify `SameCompany`. Otherwise, you can specify `VariousCompanies`. This param is optional, so you will be prompted for destination info if not provided.
-
-`SourceStrategy` - To allow for recursing into sub-directories when searching for resources, you can specify this with `-SourceStrategy Recurse`, otherwise to stay at a single level in your `TargetDocumentDir`, you can specify `-SourceStrategy Recurse` or omit this param and you will be prompted.
-
-`IncludeDirectories` - Whether or not to treat directories as a resource. Reccomended to be used WITHOUT a recursive source strategy. See below per-document examples for what this looks like.
-
-`IncludeOriginals` - Include original documents attached to articles, alongside converted counterparts? Default is true.
-
-`MaxItems` - Max allowed Files/Directories to handle at once. Default is 500. If your `TargetDocumentDir`, `SourceStrategy`, and/or `filter` results in more than this number of files, you will be prompted to continue or exit and refine your command.
-
-`MaxTotalBytes` - Max allowed total filesize for pre-converted documents/attachments. Default is 5gb
-
-`MaxDepth` - Max recursion depth (if using 'Recurse' for your `SourceStrategy`)- default is 5 levels of recursion
 
 ---
 
