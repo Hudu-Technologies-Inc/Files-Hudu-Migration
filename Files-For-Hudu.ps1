@@ -64,7 +64,7 @@ param(
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
     if (-not $HuduApiKey) {$HuduApiKey = Read-Host "Enter Hudu API Key"; clear-host;}
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
-    if (-not $SourceStrategy) {$SourceStrategy = Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")}
+    if (-not $SourceStrategy) {$SourceStrategy = $(if ($IncludeDirectories.IsPresent) {'TopLevel'} else {Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")})}
     [long]$MaxItemBytes = 100MB
 
     # check requested documents
@@ -97,7 +97,7 @@ param(
         $sourceObjects = $sourceObjects |
             Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
     }
-    if ($null -ne $filter) {
+    if (-not [string]::IsNullOrEmpty($filter)) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
         $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
     }
