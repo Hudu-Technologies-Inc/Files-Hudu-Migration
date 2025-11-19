@@ -3,7 +3,7 @@
 
 This project provides a unified, highly-extensible workflow for generating Hudu articles from many different types of source material (directories, files, PDFs, Office docs, HTML pages, authenticated web content, etc.).
 
-It uses the **community-supported “articles anywhere” methods**, but this wrapper adds additional structure, pre-processing, extract/convert logic, sane defaults, and guardrails.
+It uses the **community-supported [Articles-From-Anything](./Client-Libraries/Articles-From-Anything/README.md) methods**, but this wrapper adds additional structure, pre-processing, extract/convert logic, sane defaults, and guardrails.
 
 *It supports remote filestores as well, including SharePoint, OneDrive, and any resource accessible in Windows Explorer through a mapped drive.*
 
