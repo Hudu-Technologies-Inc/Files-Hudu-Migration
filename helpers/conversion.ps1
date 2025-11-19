@@ -150,7 +150,7 @@ function New-HuduArticleFromLocalResource {
             $images = Get-ChildItem -LiteralPath $outputDir -File -Recurse -ErrorAction SilentlyContinue |
                 Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' } |
                 Select-Object -ExpandProperty FullName
-
+            write-host "$($images.count) images extracted during conversion."
             $newDoc = Set-HuduArticleFromHtml -ImagesArray ($images ?? @()) `
                                             -CompanyName $(if ($true -eq $IsGlobalKB) {''} else {$CompanyName}) `
                                             -Title $originalName `

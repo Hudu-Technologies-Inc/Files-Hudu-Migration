@@ -153,7 +153,7 @@ function Set-HuduArticleFromHtml {
   $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.Id }
 
   $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-
+  write-host "Processing $($ImagesArray.Count) images for article '$Title'..."
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
@@ -168,7 +168,7 @@ function Set-HuduArticleFromHtml {
     $existingUpload = $existingUpload.upload ?? $existingUpload
 
     if (-not $existingUpload) {
-        New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id
+        $uploaded = New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id
         $uploaded = $uploaded.upload ?? $uploaded
     }
 
@@ -183,6 +183,7 @@ function Set-HuduArticleFromHtml {
 
   # 4) Build maps for rewriting
   $imageMap   = New-DocImageMap -HuduImages $HuduImages
+
 
   $thisUrl = $articleUsed.article.url ?? $articleUsed.url
   $articleMap = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -227,7 +228,6 @@ function Set-HuduArticleFromHtml {
   $ctx = @{ ImageMap = $imageMap; ArticleMap = $articleMap }
   $r = Rewrite-DocLinks -Html $HtmlContents -ImageResolver $ImageResolver -LinkResolver $LinkResolver -Context $ctx
   Set-HuduArticle -Id $articleUsed.Id -CompanyId $articleUsed.company_id -Content $r.Html | Out-Null
-
   [pscustomobject]@{
     Title       = $Title
     Article     = $r.Html

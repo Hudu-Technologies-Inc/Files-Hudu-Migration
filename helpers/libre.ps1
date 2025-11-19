@@ -1,4 +1,4 @@
-function Get-LibreOfficeLatesMSI {
+function Get-LatestLibreURI {
     [CmdletBinding()]
     param([string]$BaseUri = 'https://mirror.usi.edu/pub/tdf/libreoffice/stable/')
 
@@ -36,16 +36,19 @@ function Stop-LibreOffice {
 
 function Get-LibreMSI {
     param ([string]$tmpfolder)
+    if ([string]::IsNullOrEmpty($tmpfolder)) {
+        $tmpfolder = [System.IO.Path]::GetTempPath()
+    }
     if (Test-Path "C:\Program Files\LibreOffice\program\soffice.exe") {
         return "C:\Program Files\LibreOffice\program\soffice.exe"
     }
-    $downloadUrl = $(Get-LibreOfficeLatesMSI) ?? "https://mirror.usi.edu/pub/tdf/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi"
+    $downloadUrl = $(Get-LatestLibreURI) ?? "https://mirror.usi.edu/pub/tdf/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi"
     $downloadPath = Join-Path $tmpfolder "LibreOffice.msi"
 
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath
 
     # Attempt to install
-    Start-Process msiexec.exe -ArgumentList "/i `"$downloadPath`" /qn" -Wait
+    Start-Process msiexec.exe -ArgumentList "/i `"$downloadPath`"" -Wait
 
     # Look for default install path
     $sofficePath = "C:\Program Files\LibreOffice\program\soffice.exe"
