@@ -48,6 +48,14 @@ This project serves as a **safe foundation** for:
 
 ---
 
+> **Permissions Notice**
+>
+> Some scripts may require elevated permissions. If you encounter access-related errors, consider launching PowerShell (`pwsh`) with **Run as Administrator**.
+>
+> Please note that administrative privileges do not override Windows Rights Management or similarly enforced file protection mechanisms.
+
+---
+
 ## Examples:
 
 #### Recursing Through a Path of various document types (Bulk File → Article)
