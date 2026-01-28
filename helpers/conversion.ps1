@@ -117,7 +117,8 @@ function New-HuduArticleFromLocalResource {
               continue
           } else {
               $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
-              Write-Host "Article $($MatchedDocs.Name) matched and set to be updated from $($doc.FullName)"
+              Write-Host "Article $($MatchedDocs.Name) matched and set to be SKIPPED from $($doc.FullName)"
+              continue
           }
         }
       } else {$MatchedDocs=$null}
@@ -147,6 +148,13 @@ function New-HuduArticleFromLocalResource {
             $htmlPath = Convert-WithLibreOffice -InputFile $localIn `
                                                 -OutputDir $outputDir `
                                                 -SofficePath $sofficePath
+            if ([string]::IsNullOrWhiteSpace($htmlPath) -or -not (Test-Path -LiteralPath $htmlPath)) {
+                $htmlPath = get-childitem -Path $outputDir -Filter "*.xhtml" -File | Select-Object -First 1
+                $htmlPath = $htmlPath ?? $(get-childitem -Path $outputDir -Filter "*.html" -File | Select-Object -First 1)
+            }
+            if ([string]::IsNullOrWhiteSpace($htmlPath) -or -not (Test-Path -LiteralPath $htmlPath)) {
+                throw "Conversion to HTML failed for $($doc.FullName); no HTML output found."
+            }
             $images = Get-ChildItem -LiteralPath $outputDir -File -Recurse -ErrorAction SilentlyContinue |
                 Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' } |
                 Select-Object -ExpandProperty FullName
@@ -453,3 +461,87 @@ function Save-Base64ToFile {
     Set-PrintAndLog -message  "Saved Base64 content to: $OutputPath" -Color Cyan
 }
 
+
+function Get-FileMagicBytes {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [int]$Count = 16
+    )
+
+    $fs = [System.IO.File]::OpenRead($Path)
+    try {
+        $buffer = New-Object byte[] $Count
+        $fs.Read($buffer, 0, $Count) | Out-Null
+        return $buffer
+    }
+    finally {
+        $fs.Dispose()
+    }
+}
+function Test-IsPdf {
+    param($Bytes)
+
+    # %PDF-
+    return ($Bytes[0] -eq 0x25 -and
+            $Bytes[1] -eq 0x50 -and
+            $Bytes[2] -eq 0x44 -and
+            $Bytes[3] -eq 0x46 -and
+            $Bytes[4] -eq 0x2D)
+}
+function Test-IsDocx {
+    param([string]$Path, $Bytes)
+
+    # ZIP header
+    if (-not ($Bytes[0] -eq 0x50 -and $Bytes[1] -eq 0x4B)) {
+        return $false
+    }
+
+    try {
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        $found = $zip.Entries | Where-Object { $_.FullName -ieq 'word/document.xml' }
+        return [bool]$found
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($zip) { $zip.Dispose() }
+    }
+}
+function Test-IsPlainText {
+    param([string]$Path)
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+
+    # Reject if NULL bytes found
+    if ($bytes -contains 0) { return $false }
+
+    try {
+        [System.Text.Encoding]::UTF8.GetString($bytes) | Out-Null
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+function Get-FileType {
+    param([string]$Path)
+
+    $magic = Get-FileMagicBytes $Path
+
+    if (Test-IsPdf $magic) {
+        return 'PDF'
+    }
+
+    if (Test-IsDocx $Path $magic) {
+        return 'DOCX'
+    }
+
+    if (Test-IsPlainText $Path) {
+        return 'PlainText'
+    }
+
+    return 'UnknownBinary'
+}
