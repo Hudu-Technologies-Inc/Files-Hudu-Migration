@@ -176,7 +176,7 @@ function New-HuduArticleFromLocalResource {
     $results = [pscustomobject]@{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
-        attachmentStatus = "No attachment info yet."; 
+        attachmentStatus = "No attachment info yet."; AttachmentHashInfo = $null; LocalAttachmentNewer = $null; RemoteAttachmentUTCdate = $null;
         NewDoc = $null; OriginalDoc = $null; Upload = $null; CalculateEmbedHashes = ([bool]($script:CurrentHuduVersion -ge [version]("2.39.0")))
     }
 
@@ -315,19 +315,19 @@ function New-HuduArticleFromLocalResource {
     }
 
     if ($true -eq $includeOriginals -or $true -eq $results.isScript) {
-        $uploadHashResult = $null; $localNewer = $false;
         $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
         if ($existingupload){
             write-host "An existing upload (attachment) was found." -ForegroundColor DarkGray
             if ($script:CurrentHuduVersion -lt [version]("2.39.0")){
                 $results.attachmentStatus =  "Existing attachment upload found for article, but current Hudu version $script:CurrentHuduVersion does not support hash comparison. Using existing attachment/upload as-is. Update to hudu version 2.39.0 or newer to enable hash comparison."; write-host $results.attachmentStatus -ForegroundColor Yellow;
             } else {
-                $uploadHashResult = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
-                $uploadUniversalTime = (([datetime]$existingupload.created_date).add($script:DateCompareJitterHours)).ToUniversalTime()
-                $localNewer = $results.SourceLastModified -gt $uploadUniversalTime
-                if (((-not $uploadHashResult.SameFile) -and $localNewer) -or ([string]::IsNullOrWhiteSpace($uploadHashResult.localPath))) {
-                    $results.attachmentStatus = "Existing attachment upload is older $($uploadUniversalTime) and has different hash. Deleting existing upload to replace with new version."; write-host $results.attachmentStatus -ForegroundColor Yellow;
+                $results.AttachmentHashInfo = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
+                $results.RemoteAttachmentUTCdate = (([datetime]$existingupload.created_date).add($script:DateCompareJitterHours)).ToUniversalTime()
+                $results.LocalAttachmentNewer = $results.SourceLastModified -gt $results.RemoteAttachmentUTCdate
+                if (((-not $results.AttachmentHashInfo.SameFile) -and $results.LocalAttachmentNewer) -or ([string]::IsNullOrWhiteSpace($results.AttachmentHashInfo.localPath))) {
+                    $results.attachmentStatus = "Existing attachment upload is older $($results.RemoteAttachmentUTCdate) and has different hash. Deleting existing upload to replace with new version."; write-host $results.attachmentStatus -ForegroundColor Yellow;
                     Remove-HuduUpload -id $existingupload.id -confirm:$false
+                    $existingupload = $null
                 } else {
                     $results.attachmentStatus = "Existing attachment upload appears newest. No need to replace."; write-host $results   .attachmentStatus -ForegroundColor Green;
                     $results.Upload = $existingupload
