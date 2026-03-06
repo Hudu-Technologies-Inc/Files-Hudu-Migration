@@ -257,8 +257,6 @@ function New-HuduArticleFromLocalResource {
             -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) `
             -Title $results.originalName `
             -HtmlContents $html
-        $results.ArticleResult = $results.NewDoc
-        $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
     } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Host $results.Strategy -ForegroundColor Green
         $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $company.name }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
@@ -308,6 +306,8 @@ function New-HuduArticleFromLocalResource {
         }
         return $results
     }
+    $results.ArticleResult = $results.NewDoc
+    $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
 
     if ($null -eq $results.NewDoc -or -not $results.NewDoc.id) {
         $results.Error = "New Document object $($results.NewDoc | Out-String) unexpectedly came back empty"
