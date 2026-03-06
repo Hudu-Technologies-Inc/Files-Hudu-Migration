@@ -13,6 +13,60 @@ function Normalize-Text {
     }
     ($sb.ToString()).Normalize([System.Text.NormalizationForm]::FormC)
 }
+function Get-HTMLTemplatedScriptContent {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [string]$FilePath,
+
+        [string]$Heading,
+
+        [string]$OutputPath
+    )
+
+    $file = Get-Item -LiteralPath $FilePath -ErrorAction Stop
+
+    if (-not $Heading) {
+        $Heading = "$($file.Name) - $($file.Extension) Script"
+    }
+
+    $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
+    $encoded = [System.Net.WebUtility]::HtmlEncode($content)
+
+    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+
+    $html = @"
+<h2>$Heading</h2>
+
+<pre><code>$encoded</code></pre>
+
+<hr>
+
+<div>
+<b>Metadata</b>
+<ul>
+  <li>Original Filename: $($file.Name)</li>
+  <li>Source Directory: $($file.DirectoryName)</li>
+  <li>FileHash (SHA256): $hash</li>
+  <li>Last Modified (UTC): $($file.LastWriteTimeUtc)</li>
+</ul>
+</div>
+"@
+
+    if ($OutputPath) {
+
+        $dir = Split-Path $OutputPath -Parent
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+
+        [IO.File]::WriteAllText($OutputPath, $html, [Text.UTF8Encoding]::new($false))
+    }
+
+    return $html
+}
 function Compare-StringsIgnoring {
     [CmdletBinding()]
     param(
