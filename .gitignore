@@ -2,6 +2,11 @@
 *.json
 *env*
 !*.example
+Docs-Temp
+*Temp*/*
+Docs-Temp/*
+*.log
+*tmp*
 .jpg
 .jpeg
 .png
@@ -83,3 +88,4 @@
 .old
 .partial
 .env
+docs-temp/*
