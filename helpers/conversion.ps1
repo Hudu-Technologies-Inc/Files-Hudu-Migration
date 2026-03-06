@@ -166,7 +166,7 @@ function New-HuduArticleFromLocalResource {
     $companyDocs = $null; $MatchedDocs = $null;
     $results = @{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
-        Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
+        Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; attachmentStatus = ""
         NewDoc = $null; OriginalDoc = $null; Upload = $null;
     }
 
@@ -316,7 +316,22 @@ function New-HuduArticleFromLocalResource {
     }
 
     if ($true -eq $includeOriginals -or $true -eq $results.isScript) {
-        $results.Upload = New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName
+        $uploadHashResult = $null; $localNewer = $false;
+        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
+        if ($existingupload){
+            write-host "An existing upload (attachment) was found. Comparing dates + hashes to determine if we need to replace."
+            $uploadHashResult = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
+            $localNewer = $results.SourceLastModified -gt ([datetime]$existingupload.created_date).ToUniversalTime()
+            if (-not $uploadHashResult.HashMatches -or $localNewer) {
+                $result.attachmentStatus = "Existing upload is older or has different hash. Deleting existing upload to replace with new version."; write-host $result.attachmentStatus -ForegroundColor Yellow
+                Remove-HuduUpload -id $existingupload.id -confirm:$false
+            } else {
+                $result.attachmentStatus = "Existing upload is up to date. No need to replace."; write-host $result.attachmentStatus -ForegroundColor Green
+                $results.Upload = $existingupload
+                return $results
+            }
+        } else {$result.attachmentStatus = "No existing upload found. Proceeding to upload new file."; write-host $result.attachmentStatus -ForegroundColor Green}        
+        $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
         $results.Upload = $results.Upload.upload ?? $results.Upload
     }
         return $results
