@@ -103,7 +103,7 @@ function Set-HuduArticleFromHtml {
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
     [switch]$CreateCompanyIfMissing = $false,
-    [switch]$CalculateHashes = $true,
+    [bool]$CalculateHashes = $true,
     [string]$HuduBaseUrl
   )
 
@@ -613,7 +613,7 @@ function Set-HuduArticleFromPDF {
     [string]$CompanyName,
     [string]$Title,
     [bool]$includeOriginal=$true, # include original pdf attached to converted article
-    [switch]$CalculateHashes = $true
+    [bool]$CalculateHashes = $true
   )
 
   [version]$script:CurrentHuduVersion = $script:CurrentHuduVersion ?? $([version]("$($(get-huduappinfo).version)"))
@@ -631,7 +631,7 @@ function Set-HuduArticleFromPDF {
               -CompanyName  $CompanyName `
               -Title        $displayTitle `
               -HtmlContents $pdfData.Html `
-              -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes:$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0')
+              -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
 
   if ($true -eq $includeOriginal){
     New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $newDoc.HuduArticle.Id | Out-Null
