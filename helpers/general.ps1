@@ -14,6 +14,17 @@ function Normalize-Text {
     ($sb.ToString()).Normalize([System.Text.NormalizationForm]::FormC)
 }
 
+function Remove-NullHashtableValues {
+    param([hashtable]$Hashtable)
+
+    foreach ($key in $Hashtable.Keys.Clone()) {
+        if ($null -eq $Hashtable[$key]) {
+            $Hashtable.Remove($key)
+        }
+    }
+
+    return $Hashtable
+}
 function Get-MetadataArticleBlock {
     param ([string]$filePath)
     $file = Get-Item -LiteralPath $filePath

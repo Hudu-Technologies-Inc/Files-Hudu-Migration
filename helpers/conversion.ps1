@@ -74,7 +74,7 @@ function Test-ShouldUpdateUpload {
 
   # normalize dest updated time to UTC
   $destUpdatedUtc = $null
-  if ($DestUpload.PSObject.Properties.Name -contains 'updated_at' -and $DestUpload.updated_at) {
+  if ($DestUpload.PSObject.Properties.Name -contains 'created_at' -and $DestUpload.updated_at) {
     try { $destUpdatedUtc = ([datetime]$DestUpload.updated_at).ToUniversalTime() } catch {}
   }
 

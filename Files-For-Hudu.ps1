@@ -187,6 +187,8 @@ param(
             }
             write-host "$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            $result | format-list | Out-String | Write-Host -ForegroundColor Green
+
             $results.Add($result)
 
             Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green
