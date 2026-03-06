@@ -103,46 +103,92 @@ function Test-ShouldUpdateUpload {
   }
 }
 
+function Test-ShouldUpdateUpload {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory)][bool]$UpdateOnMatch,
+    [Parameter(Mandatory)][ValidateSet('date','filehash','none')][string]$Strategy,
+    # local
+    [Parameter(Mandatory)][datetime]$SourceMTimeUtc,
+    [string]$SourceSha256,
+    [object]$DestUpload
+  )
+
+  if (-not $UpdateOnMatch) { return $false }
+  if ($Strategy -eq 'none') { return $false }
+  if ($null -eq $DestUpload) { return $true }
+
+  # normalize dest updated time to UTC
+  $destUpdatedUtc = $null
+  if ($DestUpload.PSObject.Properties.Name -contains 'updated_at' -and $DestUpload.updated_at) {
+    try { $destUpdatedUtc = ([datetime]$DestUpload.updated_at).ToUniversalTime() } catch {}
+  }
+
+  switch ($Strategy) {
+    'date' {
+      if ($null -eq $destUpdatedUtc) { return $true }           # can’t compare => choose update
+      return ($SourceMTimeUtc -gt $destUpdatedUtc)
+    }
+
+    'filehash' {
+      if ([string]::IsNullOrWhiteSpace($SourceSha256)) { return $true } # can’t compare => update
+
+      # If your Hudu upload object includes a hash/checksum field, use it here.
+      $destHash = $null
+      foreach ($p in @('sha256','checksum','hash')) {
+        if ($DestUpload.PSObject.Properties.Name -contains $p -and $DestUpload.$p) { $destHash = $DestUpload.$p; break }
+      }
+
+      # fall back to date if no hash is available (folder) 
+      if ([string]::IsNullOrWhiteSpace($destHash)) {
+        if ($null -ne $destUpdatedUtc) { return ($SourceMTimeUtc -gt $destUpdatedUtc) }
+        return $true
+      }
+
+      return ($SourceSha256.ToUpperInvariant() -ne $destHash.ToUpperInvariant())
+    }
+  }
+}
 function New-HuduArticleFromLocalResource {
   param (
     [string]$resourceLocation,
     [string]$companyName=$null,
     [array]$companyDocs=$null,
     [bool]$updateOnMatch=$true,
+    [Parameter(Mandatory)][ValidateSet('date','filehash','none')][string]$UpdateStrategy,
     [bool]$includeOriginals=$true,
+    [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
     [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
   )
-  $companyDocs = $null; $MatchedDocs = $null;
-  $results = @{
-    RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName;}
-    Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null;
-    IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null;
-    NewDoc = $null; OriginalDoc = $null; Upload = $null;
+    Get-EnsuredPath -Path $DocConversionTempDir
+
+    $companyDocs = $null; $MatchedDocs = $null;
+    $results = @{
+        RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
+        Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
+        NewDoc = $null; OriginalDoc = $null; Upload = $null;
     }
 
     if (([string]::IsNullOrWhiteSpace($resourceLocation)) -or -not $(test-path $resourceLocation)){
         $results.Error= "resource location $resourceLocation does not appear to be a valid path"; Write-Warning $results.Error; 
         return $results
     }
-
-    write-host "user-supplied path seems to exist" -ForegroundColor Green
-    if ([string]::IsNullOrEmpty($companyName)){
-    } else {
+    if (-not ([string]::IsNullOrEmpty($companyName))){
       $results.Company = $(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies)) ?? $null
     }
     $results.IsGlobalKB = [bool]$($null -eq $results.Company)
     write-host "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$($results.Company.name)' KB"}) will be target for this article" -ForegroundColor Green
 
-
     $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $results.Company.id})
     $results.OriginalDoc = Get-Item -LiteralPath $resourceLocation
+      $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
+      $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
     $results.SourceLastModified = $results.OriginalDoc.LastWriteTimeUtc; write-host "source document $($results.originalName) last modified (UTC): $($results.SourceLastModified)";
-
     # determine if we're looking at a file or directory and set strategy
     if ($results.OriginalDoc.PSIsContainer) {
         $results.isDirectory = $true
-        $results.Strategy = "user-supplied path appears to be a file. determining strategy for single-file"; Write-host $results.Strategy -ForegroundColor Green
+        $results.Strategy = "user-supplied path appears to be a directory. proccing it as a resource itself (gallery of photos, index of files)"; Write-host $results.Strategy -ForegroundColor Green
         try {$results.NewDoc = $(
             if ($null -ne $results.Company) {
                 Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc -companyName $results.Company.name
@@ -153,38 +199,74 @@ function New-HuduArticleFromLocalResource {
             }
     } else {$results.isDirectory = $false}
 
-    try {
       $results.Strategy = "user-supplied path appears to be a file. determining strategy for single-file"; Write-host $results.Strategy -ForegroundColor Green
-      $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
-      $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)
       $results.AllowedToConvertFile = $DisallowedForConvert -contains $results.originalExt
       $results.isPdf        = ($results.originalExt -eq '.pdf')
       $results.isImage      = ($results.originalExt -in $EmbeddableImageExtensions)
-      $results.Shouldconvert = -not $results.AllowedToConvertFile
-
-      
-      if (-not ([string]::IsNullOrEmpty($results.originalName)) -and $companyDocs -and $companyDocs.count -gt 0){
-        $MatchedDocs = $companyDocs | Where-Object {(Test-Equiv -A $_.name -B $results.originalName) -or $(Compare-StringsIgnoring -A $_.name -B $results.originalName)}
-        if ($MatchedDocs -or $MatchedDocs.count -gt 0){
-          if ($false -eq $updateOnMatch){
-              $result.Action = "Skipped on basis of $($results.originalName) matched existing documents: $($MatchedDocs.name -join ', ') and updateonmatch set to false.";
-              return $result;
-          } else {
-              $MatchedDocs = $($MatchedDocs | Select-Object -First 1) ?? $MatchedDocs
-              $result.Action = "Article $($MatchedDocs.Name) matched and set to be SKIPPED from $($results.OriginalDoc.FullName)"; 
-              return $result
-          }
+      $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
+        $results.FileHash = "$(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash"
+        if ($results.originalName -and $companyDocs?.Count) {
+        $MatchedDocs = $companyDocs | Where-Object {
+            (Test-Equiv -A $_.name -B $results.originalName) -or
+            (Compare-StringsIgnoring -A $_.name -B $results.originalName)
         }
-      }
 
-      if ($true -eq $results.isImage) {
+            if ($MatchedDocs?.Count) {
+            $results.MatchedDoc = $MatchedDocs | Select-Object -First 1; $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc;
+
+            if (-not $updateOnMatch) {
+                $results.Action = "SkippedMatch(updateOnMatch=false)"; Write-Host $results.Action -ForegroundColor Yellow
+                return $results
+            } else {
+                if ($results.UpdateStrategy -eq 'date') {
+                    $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -DestUpload $results.MatchedDoc.attachments[0]
+                    $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but source is newer; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update." }
+                    Write-Host $results.Action -ForegroundColor Yellow
+                    if (-not $shouldUpdate) { return $results }
+                } elseif ($results.UpdateStrategy -eq 'filehash') {
+                    $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -SourceSha256 $results.FileHash .Hash -DestUpload $results.MatchedDoc.attachments[0]
+                    $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but file hash differs; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update." }
+                    Write-Host $results.Action -ForegroundColor Yellow
+                    if (-not $shouldUpdate) { return $results }
+                } else {
+                    # strategy 'none' should have been handled by the earlier check, but just in case:
+                    $results.Action = "Matched existing article '$($results.MatchedDoc.name)' but UpdateStrategy is 'none'; skipping update."
+                    Write-Host $results.Action -ForegroundColor Yellow
+                    return $results
+                }
+            }
+        }
+    }
+      
+    try {
+
+    if ($true -eq $results.isScript) {
+        $safeName = ($results.originalName -replace '[^\w\.-]', '_')
+        $results.HtmlPath = [IO.Path]::Combine(
+            $DocConversionTempDir,
+            "$safeName-$(Get-Date -Format 'yyyyMMddHHmmss').html"
+        )
+
+        $html = Get-HTMLTemplatedScriptContent `
+            -FilePath $results.OriginalDoc.FullName `
+            -Heading $results.originalName `
+            -OutputPath $results.HtmlPath
+        write-host "HTML from script generated at $($results.HtmlPath) with contents $($html | Out-String)" -ForegroundColor Green
+        $results.NewDoc = Set-HuduArticleFromHtml `
+            -ImagesArray @() `
+            -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) `
+            -Title $results.originalName `
+            -HtmlContents $html
+        $results.ArticleResult = $results.NewDoc
+        $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
+    } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Host $results.Strategy -ForegroundColor Green
         $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $company.name }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
       }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Host $results.Strategy -ForegroundColor Green
     # conversion process - pdf [convert to html and attach graphics]
         $results.NewDoc = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName; $results.NewDoc = $results.NewDoc.HuduArticle;
-      } elseif ($true -eq $results.Shouldconvert) {
+      } elseif ($true -eq $results.AllowedToConvertFile) {
     # conversion process - non-pdf [but convertable]
         $results.Strategy = "Processing as singular file to convert to and attach as Article."; Write-Host $results.Strategy -ForegroundColor Green
             $results.outputDir = Join-Path $DocConversionTempDir ([guid]::NewGuid().ToString())
@@ -227,25 +309,24 @@ function New-HuduArticleFromLocalResource {
         return $results
     }
 
-      if ($null -eq $results.NewDoc -or -not $results.NewDoc.id) {
-          $result.Error = 'Exception'; error="New Document object $results.NewDoc unexpectedly came back empty"; Write-Error $result.Error;
-          return $result
-      }
-      $results.From=$results.OriginalDoc.FullName;
+    if ($null -eq $results.NewDoc -or -not $results.NewDoc.id) {
+        $results.Error = "New Document object $($results.NewDoc | Out-String) unexpectedly came back empty"
+        Write-Error $results.Error
+        return $results
+    }
 
-      if ($includeOriginals) {
+    if ($true -eq $includeOriginals -or $true -eq $results.isScript) {
         $results.Upload = New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName
         $results.Upload = $results.Upload.upload ?? $results.Upload
-      }
-
-      
-
-    } catch {
-      $results.Error =  "Error processing '$($results.OriginalDoc.FullName)': $($($_ | convertto-json -depth 99).ToString()))"; Write-Error $results.Error;
-      return $results
     }
-    
+        return $results
+    } catch {
+
+        $results.Error = "Error during processing: $_"; Write-Error $results.Error
+        return $results
+    }
 }
+    
 function Convert-WithLibreOffice {
     param (
         [string]$inputFile,

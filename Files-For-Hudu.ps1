@@ -10,6 +10,13 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$filter=$null,
 
+    [Parameter(Mandatory = $false)]
+    [bool]$updateFilesOnMatch=$true,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('date','filehash','none')]
+    [string]$UpdateStrategy = 'date',
+
     # Destination strategy:
     # - VariousCompanies: prompt per-file
     # - SameCompany: choose once for all
@@ -54,7 +61,14 @@ param(
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
         . $file.FullName
     }
-    . .\files-config.ps1
+    try {
+        . .\files-config.ps1
+    } catch {
+        Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
+        $EmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
+        $DisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
+        $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
+    }
 
     # Ensure or prompt for params and directories
     Get-EnsuredPath -Path $DocConversionTempDir
@@ -134,8 +148,20 @@ param(
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
                 IncludeOriginals = ($IncludeOriginals ?? $true)
             }
+            $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
+            [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null
+
+            $articleFromResourceRequest.DocConversionTempDir = $DocConversionTempDir ?? $alternativeTempPath
+            $articleFromResourceRequest.includeOriginals = $IncludeOriginals ?? $true
             if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
+            if ($true -eq $updateFilesOnMatch) {
+                $articleFromResourceRequest.updateOnMatch = $true
+                $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
+            } else {
+                $articleFromResourceRequest.UpdateStrategy = 'none'
+                $articleFromResourceRequest.updateOnMatch = $false
+            }
 
             switch ($DestinationStrategy) {
                 'VariousCompanies' {
@@ -158,7 +184,7 @@ param(
                     # No companyName => global KB in your New-HuduArticleFromLocalResource logic
                 }
             }
-
+            write-host "$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
             $results.Add($result)
 
@@ -174,9 +200,7 @@ param(
         }
     }
 
-    $resultsFile  = $(Join-Path $workdir -ChildPath "Files-Hudu-Migrate-$(Get-Date -Format 'yyyyMMdd-HHmmss').json")
     Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
-    $results | ConvertTo-Json -depth 99 | Out-File -FilePath $resultsFile
     if ($true -eq $PersistTempfiles) {
         Write-Host "Temporary files have been preserved at $DocConversionTempDir" -ForegroundColor Yellow
     } else {
