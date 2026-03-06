@@ -242,21 +242,10 @@ function New-HuduArticleFromLocalResource {
 
     if ($true -eq $results.isScript) {
         $safeName = ($results.originalName -replace '[^\w\.-]', '_')
-        $results.HtmlPath = [IO.Path]::Combine(
-            $DocConversionTempDir,
-            "$safeName-$(Get-Date -Format 'yyyyMMddHHmmss').html"
-        )
-
-        $html = Get-HTMLTemplatedScriptContent `
-            -FilePath $results.OriginalDoc.FullName `
-            -Heading $results.originalName `
-            -OutputPath $results.HtmlPath
+        $results.HtmlPath = [IO.Path]::Combine($DocConversionTempDir,"$safeName-$(Get-Date -Format 'yyyyMMddHHmmss').html")
+        $html = Get-HTMLTemplatedScriptContent -FilePath $results.OriginalDoc.FullName -Heading $results.originalName -OutputPath $results.HtmlPath
         write-host "HTML from script generated at $($results.HtmlPath) with contents $($html | Out-String)" -ForegroundColor Green
-        $results.NewDoc = Set-HuduArticleFromHtml `
-            -ImagesArray @() `
-            -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) `
-            -Title $results.originalName `
-            -HtmlContents $html
+        $results.NewDoc = Set-HuduArticleFromHtml -ImagesArray @() -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) -Title $results.originalName -HtmlContents $html
     } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Host $results.Strategy -ForegroundColor Green
         $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $company.name }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
@@ -322,7 +311,7 @@ function New-HuduArticleFromLocalResource {
             write-host "An existing upload (attachment) was found. Comparing dates + hashes to determine if we need to replace."
             $uploadHashResult = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
             $localNewer = $results.SourceLastModified -gt ([datetime]$existingupload.created_date).ToUniversalTime()
-            if (-not $uploadHashResult.HashMatches -or $localNewer) {
+            if (-not $uploadHashResult.SameFile -or $localNewer) {
                 $result.attachmentStatus = "Existing upload is older or has different hash. Deleting existing upload to replace with new version."; write-host $result.attachmentStatus -ForegroundColor Yellow
                 Remove-HuduUpload -id $existingupload.id -confirm:$false
             } else {

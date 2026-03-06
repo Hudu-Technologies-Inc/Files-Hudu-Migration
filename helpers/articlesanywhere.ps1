@@ -103,6 +103,7 @@ function Set-HuduArticleFromHtml {
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
     [switch]$CreateCompanyIfMissing = $false,
+    [switch]$CalculateHashes = $true,
     [string]$HuduBaseUrl
   )
 

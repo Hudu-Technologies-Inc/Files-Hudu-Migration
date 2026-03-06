@@ -13,6 +13,25 @@ function Normalize-Text {
     }
     ($sb.ToString()).Normalize([System.Text.NormalizationForm]::FormC)
 }
+
+function Get-MetadataArticleBlock {
+    param ([string]$filePath)
+    $file = Get-Item -LiteralPath $filePath
+    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    $html = @"
+<div>
+<b>Metadata</b>
+<ul>
+  <li>Original Filename: $($file.Name)</li>
+  <li>Source Directory: $($file.DirectoryName)</li>
+  <li>FileHash (SHA256): $hash</li>
+  <li>Last Modified (UTC): $($file.LastWriteTimeUtc)</li>
+</ul>
+</div>
+"@
+    return $html
+}
+
 function Get-HTMLTemplatedScriptContent {
 
     [CmdletBinding()]
@@ -35,24 +54,11 @@ function Get-HTMLTemplatedScriptContent {
     $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
     $encoded = [System.Net.WebUtility]::HtmlEncode($content)
 
-    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-
     $html = @"
 <h2>$Heading</h2>
-
 <pre><code>$encoded</code></pre>
-
 <hr>
-
-<div>
-<b>Metadata</b>
-<ul>
-  <li>Original Filename: $($file.Name)</li>
-  <li>Source Directory: $($file.DirectoryName)</li>
-  <li>FileHash (SHA256): $hash</li>
-  <li>Last Modified (UTC): $($file.LastWriteTimeUtc)</li>
-</ul>
-</div>
+$(Get-MetadataArticleBlock -filePath $file.FullName)
 "@
 
     if ($OutputPath) {
