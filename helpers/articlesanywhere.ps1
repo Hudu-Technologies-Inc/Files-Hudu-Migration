@@ -597,7 +597,8 @@ function Set-HuduArticleFromPDF {
     [Parameter(Mandatory)][string]$PdfPath,
     [string]$CompanyName,
     [string]$Title,
-    [bool]$includeOriginal=$true # include original pdf attached to converted article
+    [bool]$includeOriginal=$true, # include original pdf attached to converted article
+    [switch]$CalculateHashes = $true
   )
 
   if (-not (Test-Path -LiteralPath $PdfPath -PathType Leaf)) { write-warning "NO PDF, $($PdfPath)"; return $null }
