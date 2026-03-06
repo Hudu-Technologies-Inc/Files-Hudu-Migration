@@ -67,6 +67,43 @@ function Get-HTMLTemplatedScriptContent {
 
     return $html
 }
+
+function Compare-UploadHashWithFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [int]$UploadId,
+
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [string]$LocalFile
+    )
+
+    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))).Path
+
+    try {
+        $uploadEntry = Get-HuduUploads -Download -Id $UploadId -OutDir $tempDir
+        $uploadEntry = $uploadEntry.Upload ?? $uploadEntry
+        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path $LocalFile).Path       -Algorithm SHA256).Hash
+        if ([string]::isnullorempty($uploadEntry.LocalPath) -or [string]::isnullorempty($localHash)){
+            return @{SameFile = $false; LocalHash = $localHash; uploadHash = $null }
+        }
+
+        $uploadHash = (Get-FileHash -LiteralPath (Resolve-Path $uploadEntry.LocalPath).Path -Algorithm SHA256).Hash
+
+        @{
+            SameFile   = ($uploadHash -eq $localHash)
+            UploadHash = $uploadHash
+            LocalHash  = $localHash
+        }
+    }
+    finally {
+    if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
+        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    }
+}
+
 function Compare-StringsIgnoring {
     [CmdletBinding()]
     param(
