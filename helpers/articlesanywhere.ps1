@@ -103,9 +103,20 @@ function Set-HuduArticleFromHtml {
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
     [switch]$CreateCompanyIfMissing = $false,
+    [bool]$CalculateHashes = $true,
     [string]$HuduBaseUrl
   )
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
 
+    if (-not $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
+      $embedInfo = @()
   # 1) Resolve company (optional)
   $matchedCompany = $null
   if ($CompanyName) {
@@ -153,19 +164,37 @@ function Set-HuduArticleFromHtml {
   $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.Id }
 
   $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-  write-host "Processing $($ImagesArray.Count) images for article '$Title'..."
+  Write-Verbose "Processing $($ImagesArray.Count) images for article '$Title'..."
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
-    $existingUpload = $null
-    $uploaded = $null
+    $existingUpload = $null; $uploaded = $null; $comparision = $null; $existingUploadModifiedDate = $null;
     $imageFileName = ([IO.Path]::GetFileName($ImageFile)).Trim()
+    $imageMetadata = Get-Item -LiteralPath $ImageFile -ErrorAction silentlycontinue
 
     $existingUpload = $existingRelatedImages | Where-Object { $_.name -eq $imageFileName } | Select-Object -First 1
     if (-not $existingUpload) {
       $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A $_.name -B $imageFileName } | Select-Object -First 1
     }
     $existingUpload = $existingUpload.upload ?? $existingUpload
+    if ($null -ne $existingUpload -and $true -eq $CalculateHashes -and $existingUpload.id -gt 0) {
+      $comparison = Compare-UploadHashWithFile -UploadID $existingUpload.id -LocalFile $ImageFile
+      $existingUploadModifiedDate = ([datetime]::Parse(($existingUpload.created_date ?? $existingUpload.created_at))).ToUniversalTime()
+      if ($true -eq $comparison.SameFile) {
+        $embedInfo += "Existing embed '$($existingUpload.name)' with id $($existingUpload.id) matches file '$ImageFile' by hash. Reusing existing upload."; Write-Verbose $embedInfo[-1];
+      } else {
+        $embedInfo += "Local file hash: $($comparison.LocalHash) is not the same as remote file hash $($comparison.UploadHash)"; Write-Verbose $embedInfo[-1];
+        if ($imagemetadata.LastWriteTimeUtc -gt $existingUploadModifiedDate.Add($script:DateCompareJitterHours)) {
+          $embedinfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). replace with new (local) version."; Write-Verbose $embedInfo[-1];
+          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash and local file appears newer."; Write-Verbose $embedInfo[-1];
+          try {remove-huduupload -id $existingUpload.id -confirm:$false} catch { $embedInfo += "Failed to remove older existing upload with id $($existingUpload.id): $($_.Exception.Message)"; write-warning $embedInfo[-1] }
+          $existingUpload = $null
+        } else {
+          $embedInfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). keeping existing upload."; Write-Verbose $embedInfo[-1];
+          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash but local file appears older. keeping existing upload."; Write-Verbose $embedInfo[-1];
+        }
+      }
+    }
 
     if (-not $existingUpload) {
         $uploaded = New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id
@@ -234,6 +263,7 @@ function Set-HuduArticleFromHtml {
     HuduArticle = $articleUsed
     HuduImages  = $HuduImages
     HuduCompany = $matchedCompany
+    EmbedInfo   = $embedInfo
     Rewrites    = $r.Rewrites
     Unresolved  = $r.Unresolved
   }
@@ -596,9 +626,20 @@ function Set-HuduArticleFromPDF {
     [Parameter(Mandatory)][string]$PdfPath,
     [string]$CompanyName,
     [string]$Title,
-    [bool]$includeOriginal=$true # include original pdf attached to converted article
+    [bool]$includeOriginal=$true, # include original pdf attached to converted article
+    [bool]$CalculateHashes = $true
   )
 
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
+
+    if (-not $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }  
   if (-not (Test-Path -LiteralPath $PdfPath -PathType Leaf)) { write-warning "NO PDF, $($PdfPath)"; return $null }
 
   $pdfBaseName = [IO.Path]::GetFileNameWithoutExtension($PdfPath)
@@ -612,7 +653,7 @@ function Set-HuduArticleFromPDF {
               -CompanyName  $CompanyName `
               -Title        $displayTitle `
               -HtmlContents $pdfData.Html `
-              -HuduBaseUrl  (Get-HuduBaseURL)
+              -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.39.0'))
 
   if ($true -eq $includeOriginal){
     New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $newDoc.HuduArticle.Id | Out-Null
