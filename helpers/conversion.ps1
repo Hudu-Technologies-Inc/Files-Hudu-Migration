@@ -166,7 +166,7 @@ function New-HuduArticleFromLocalResource {
     $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
 
     $companyDocs = $null; $MatchedDocs = $null;
-    $results = @{
+    $results = [pscustomobject]@{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
         attachmentStatus = "No attachment info yet.";
@@ -185,8 +185,8 @@ function New-HuduArticleFromLocalResource {
 
     $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $results.Company.id})
     $results.OriginalDoc = Get-Item -LiteralPath $resourceLocation
-      $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
-      $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
+    $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
+    $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
     $results.SourceLastModified = $results.OriginalDoc.LastWriteTimeUtc; write-host "source document $($results.originalName) last modified (UTC): $($results.SourceLastModified)";
     # determine if we're looking at a file or directory and set strategy
     if ($results.OriginalDoc.PSIsContainer) {
@@ -281,9 +281,9 @@ function New-HuduArticleFromLocalResource {
             $results.NewDoc = $results.NewDoc.HuduArticle
     # standalone article-as-attachment process [not pdf or convertable]
       } else {
-        $results.Strategy = "Processing as Attachment to Reference Article, as file cannot be converted."; Write-Host $results.Strategy -ForegroundColor Green
+        $results.Strategy = "Processing as Attachment to Reference Article, as file cannot be converted and $(if ($null -ne $results.MatchedDoc){"Article with id $($results.MatchedDoc.id) will be updated"} else {"a new article will be created"})."; Write-Host $results.Strategy -ForegroundColor Green
 
-        $results.NewDoc = $MatchedDocs ?? 
+        $results.NewDoc = $results.MatchedDoc ?? 
             $(if ($true -eq $results.IsGlobalKB) {
                 New-HuduArticle -name $results.originalName -content "Attaching Upload"
             } else {

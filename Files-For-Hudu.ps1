@@ -187,7 +187,9 @@ param(
                 }
             }
             write-host "$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
-            $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            [pscustomobject]$result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            $result = Remove-EmptyPSObjectProperties -InputObject $result
+
             $result | format-list | Out-String | Write-Host -ForegroundColor Green
 
             $results.Add($result)

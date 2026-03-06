@@ -25,6 +25,32 @@ function Remove-NullHashtableValues {
 
     return $Hashtable
 }
+
+function Remove-EmptyPSObjectProperties {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$InputObject
+    )
+
+    $out = [pscustomobject]@{}
+
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        $value = $prop.Value
+
+        $isEmpty = (
+            $null -eq $value -or
+            ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) -or
+            ($value -is [System.Collections.ICollection] -and $value.Count -eq 0)
+        )
+
+        if (-not $isEmpty) {
+            $out | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $value
+        }
+    }
+
+    return $out
+}
+
 function Get-MetadataArticleBlock {
     param ([string]$filePath)
     $file = Get-Item -LiteralPath $filePath
@@ -97,7 +123,7 @@ function Compare-UploadHashWithFile {
         [string]$LocalFile
     )
 
-    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid()))).Path
+    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid())))
 
     try {
         $uploadEntry = Get-HuduUploads -Download -Id $UploadId -OutDir $tempDir
@@ -116,9 +142,9 @@ function Compare-UploadHashWithFile {
         }
     }
     finally {
-    if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
-        Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+        if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
