@@ -71,6 +71,7 @@ param(
     }
 
     # Ensure or prompt for params and directories
+    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
     Get-EnsuredPath -Path $DocConversionTempDir
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}

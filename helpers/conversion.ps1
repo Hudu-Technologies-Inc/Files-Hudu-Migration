@@ -162,6 +162,7 @@ function New-HuduArticleFromLocalResource {
     [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
   )
     Get-EnsuredPath -Path $DocConversionTempDir
+    [version]$script:CurrentHuduVersion = $script:CurrentHuduVersion ?? $([version]("$($(get-huduappinfo).version)"))
 
     $companyDocs = $null; $MatchedDocs = $null;
     $results = @{
@@ -289,7 +290,7 @@ function New-HuduArticleFromLocalResource {
         $results.NewDoc = $results.NewDoc.article ?? $results.NewDoc
         $results.Upload = New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName; $results.Upload = $results.Upload.upload ?? $results.Upload;
         $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
-            Set-HuduArticle -id $results.NewDoc.id -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
+            Set-HuduArticle -id $results.NewDoc.id -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
         } else {
             Set-HuduArticle -id $results.NewDoc.id -companyId $matchedCompany.id -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
         }
@@ -308,21 +309,26 @@ function New-HuduArticleFromLocalResource {
         $uploadHashResult = $null; $localNewer = $false;
         $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
         if ($existingupload){
-            write-host "An existing upload (attachment) was found. Comparing dates + hashes to determine if we need to replace."
-            $uploadHashResult = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
-            $localNewer = $results.SourceLastModified -gt ([datetime]$existingupload.created_date).ToUniversalTime()
-            if (-not $uploadHashResult.SameFile -or $localNewer) {
-                $result.attachmentStatus = "Existing upload is older or has different hash. Deleting existing upload to replace with new version."; write-host $result.attachmentStatus -ForegroundColor Yellow
-                Remove-HuduUpload -id $existingupload.id -confirm:$false
+            write-host "An existing upload (attachment) was found." -ForegroundColor DarkGray
+            if ($script:CurrentHuduVersion -lt [version]("2.41.0")){
+                $result.attachmentStatus =  "Existing upload found for article, but current Hudu version $script:CurrentHuduVersion does not support hash comparison. Using existing attachment/upload as-is. Update to hudu version 2.41.0 or newer to enable hash comparison."; write-host $result.attachmentStatus -ForegroundColor Yellow
             } else {
-                $result.attachmentStatus = "Existing upload is up to date. No need to replace."; write-host $result.attachmentStatus -ForegroundColor Green
-                $results.Upload = $existingupload
-                return $results
+                $uploadHashResult = Compare-UploadHashWithFile -uploadId $existingupload.id -FilePath $results.OriginalDoc.FullName
+                $localNewer = $results.SourceLastModified -gt ([datetime]$existingupload.created_date).ToUniversalTime()
+                if (-not $uploadHashResult.SameFile -or $localNewer) {
+                    $result.attachmentStatus = "Existing upload is older or has different hash. Deleting existing upload to replace with new version."; write-host $result.attachmentStatus -ForegroundColor Yellow
+                    Remove-HuduUpload -id $existingupload.id -confirm:$false
+                } else {
+                    $result.attachmentStatus = "Existing upload is up to date. No need to replace."; write-host $result.attachmentStatus -ForegroundColor Green
+                    $results.Upload = $existingupload
+                    return $results
+                }
             }
         } else {$result.attachmentStatus = "No existing upload found. Proceeding to upload new file."; write-host $result.attachmentStatus -ForegroundColor Green}        
         $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
         $results.Upload = $results.Upload.upload ?? $results.Upload
     }
+
         return $results
     } catch {
 
