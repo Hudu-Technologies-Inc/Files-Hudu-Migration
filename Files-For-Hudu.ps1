@@ -56,6 +56,9 @@ param(
     [bool]$PersistTempfiles = $false
 )
     $WorkDir = $PSScriptRoot
+    $VerbosePreference = 'SilentlyContinue'
+    
+
     # Load helper scripts
     foreach ($file in (Get-ChildItem -Path (Join-Path $WorkDir "helpers") -Filter "*.ps1" -File | Sort-Object Name)) {
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
@@ -186,9 +189,10 @@ param(
                     # No companyName => global KB in your New-HuduArticleFromLocalResource logic
                 }
             }
+            # $VerbosePreference = 'Continue'
             write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
-            [pscustomobject]$result = New-HuduArticleFromLocalResource @articleFromResourceRequest
-            Write-ObjectNonNullProperties -InputObject $result -Title "result from processing $($sourceObject.FullName):"
+            $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            $result.GetEnumerator()
             $results.Add($result)
 
             Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green

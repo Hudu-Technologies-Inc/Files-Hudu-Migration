@@ -164,7 +164,7 @@ function Set-HuduArticleFromHtml {
   $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.Id }
 
   $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-  write-host "Processing $($ImagesArray.Count) images for article '$Title'..."
+  Write-Verbose "Processing $($ImagesArray.Count) images for article '$Title'..."
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
@@ -181,17 +181,17 @@ function Set-HuduArticleFromHtml {
       $comparison = Compare-UploadHashWithFile -UploadID $existingUpload.id -LocalFile $ImageFile
       $existingUploadModifiedDate = ([datetime]::Parse(($existingUpload.created_date ?? $existingUpload.created_at))).ToUniversalTime()
       if ($true -eq $comparison.SameFile) {
-        $embedInfo += "Existing embed '$($existingUpload.name)' with id $($existingUpload.id) matches file '$ImageFile' by hash. Reusing existing upload."; write-host $embedInfo[-1] -ForegroundColor Green;
+        $embedInfo += "Existing embed '$($existingUpload.name)' with id $($existingUpload.id) matches file '$ImageFile' by hash. Reusing existing upload."; Write-Verbose $embedInfo[-1];
       } else {
-        $embedInfo += "Local file hash: $($comparison.LocalHash) is not the same as remote file hash $($comparison.UploadHash)"; write-host $embedInfo[-1] -ForegroundColor Green;
+        $embedInfo += "Local file hash: $($comparison.LocalHash) is not the same as remote file hash $($comparison.UploadHash)"; Write-Verbose $embedInfo[-1];
         if ($imagemetadata.LastWriteTimeUtc -gt $existingUploadModifiedDate.Add($script:DateCompareJitterHours)) {
-          $embedinfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). replace with new (local) version."; write-host $embedInfo[-1] -ForegroundColor Green;
-          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash and local file appears newer."; write-host $embedInfo[-1] -ForegroundColor Green;
+          $embedinfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). replace with new (local) version."; Write-Verbose $embedInfo[-1];
+          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash and local file appears newer."; Write-Verbose $embedInfo[-1];
           try {remove-huduupload -id $existingUpload.id -confirm:$false} catch { $embedInfo += "Failed to remove older existing upload with id $($existingUpload.id): $($_.Exception.Message)"; write-warning $embedInfo[-1] }
           $existingUpload = $null
         } else {
-          $embedInfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). keeping existing upload."; write-host $embedInfo[-1] -ForegroundColor Green;
-          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash but local file appears older. keeping existing upload."; write-host $embedInfo[-1] -ForegroundColor Green;
+          $embedInfo += "Existing article embed with id $($existingUpload.id) modified at $existingUploadModifiedDate; local file last write time is $($imagemetadata.LastWriteTimeUtc). keeping existing upload."; Write-Verbose $embedInfo[-1];
+          $embedInfo += "Existing article embed '$($existingUpload.name)' with id $($existingUpload.id) does NOT match file '$ImageFile' by hash but local file appears older. keeping existing upload."; Write-Verbose $embedInfo[-1];
         }
       }
     }
