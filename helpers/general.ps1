@@ -93,6 +93,7 @@ function Compare-UploadHashWithFile {
 
         [Parameter(Mandatory)]
         [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [Alias('path','file','localpath','filepath')]
         [string]$LocalFile
     )
 

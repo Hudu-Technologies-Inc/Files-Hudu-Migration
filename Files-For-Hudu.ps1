@@ -141,6 +141,7 @@ param(
         }
     }
     $results = New-Object System.Collections.Generic.List[object]
+    $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
 
     # region: main processing loop
     foreach ($sourceObject in $sourceObjects) {
