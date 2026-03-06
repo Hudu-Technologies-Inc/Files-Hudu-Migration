@@ -162,14 +162,21 @@ function New-HuduArticleFromLocalResource {
     [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
   )
     Get-EnsuredPath -Path $DocConversionTempDir
-    [version]$script:CurrentHuduVersion = $script:CurrentHuduVersion ?? $([version]("$($(get-huduappinfo).version)"))
-    $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
 
+    if (-not $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
     $companyDocs = $null; $MatchedDocs = $null;
     $results = [pscustomobject]@{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
-        attachmentStatus = "No attachment info yet.";
+        attachmentStatus = "No attachment info yet."; 
         NewDoc = $null; OriginalDoc = $null; Upload = $null; CalculateEmbedHashes = ([bool]($script:CurrentHuduVersion -ge [version]("2.39.0")))
     }
 
@@ -203,7 +210,7 @@ function New-HuduArticleFromLocalResource {
     } else {$results.isDirectory = $false}
 
       $results.Strategy = "user-supplied path appears to be a file. determining strategy for single-file"; Write-host $results.Strategy -ForegroundColor Green
-      $results.AllowedToConvertFile = $DisallowedForConvert -contains $results.originalExt
+      $results.AllowedToConvertFile = -not ($DisallowedForConvert -contains $results.originalExt)
       $results.isPdf        = ($results.originalExt -eq '.pdf')
       $results.isImage      = ($results.originalExt -in $EmbeddableImageExtensions)
       $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))

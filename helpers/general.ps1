@@ -69,6 +69,86 @@ function Get-MetadataArticleBlock {
     return $html
 }
 
+function Write-ObjectNonNullProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$InputObject,
+
+        [string]$Title = $null
+    )
+
+    if ($Title) {
+        Write-Host "`n=== $Title ===" -ForegroundColor Cyan
+    }
+
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        $value = $prop.Value
+
+        $isEmpty = (
+            $null -eq $value -or
+            ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) -or
+            ($value -is [System.Collections.ICollection] -and $value.Count -eq 0)
+        )
+
+        if (-not $isEmpty) {
+            Write-Host ("{0,-24}: {1}" -f $prop.Name, $value) -ForegroundColor Gray
+        }
+    }
+}
+function Write-InspectObject {
+    param (
+        [object]$object,
+        [int]$Depth = 32,
+        [int]$MaxLines = 16
+    )
+    $stringifiedObject = $null
+    if ($null -eq $object) {
+        return "Unreadable Object (null input)"
+    }
+    # Try JSON
+    $stringifiedObject = try {
+        $json = $object | ConvertTo-Json -Depth $Depth -ErrorAction Stop
+        "# Type: $($object.GetType().FullName)`n$json"
+    } catch { $null }
+    # Try Format-Table
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $object | Format-Table -Force | Out-String
+        } catch { $null }
+    }
+    # Try Format-List
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $object | Format-List -Force | Out-String
+        } catch { $null }
+    }
+    # Fallback to manual property dump
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $props = $object | Get-Member -MemberType Properties | Select-Object -ExpandProperty Name
+            $lines = foreach ($p in $props) {
+                try {
+                    "$p = $($object.$p)"
+                } catch {
+                    "$p = <unreadable>"
+                }
+            }
+            "# Type: $($object.GetType().FullName)`n" + ($lines -join "`n")
+        } catch {
+            "Unreadable Object"
+        }
+    }
+    if (-not $stringifiedObject) {
+        $stringifiedObject =  try {"$($($object).ToString())"} catch {$null}
+    }
+    # Truncate to max lines if necessary
+    $lines = $stringifiedObject -split "`r?`n"
+    if ($lines.Count -gt $MaxLines) {
+        $lines = $lines[0..($MaxLines - 1)] + "... (truncated)"
+    }
+    return $lines -join "`n"
+}
 function Get-HTMLTemplatedScriptContent {
 
     [CmdletBinding()]

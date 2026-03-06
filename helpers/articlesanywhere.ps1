@@ -106,9 +106,17 @@ function Set-HuduArticleFromHtml {
     [bool]$CalculateHashes = $true,
     [string]$HuduBaseUrl
   )
-   $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
-  [version]$script:CurrentHuduVersion = $script:CurrentHuduVersion ?? $([version]("$($(get-huduappinfo).version)"))
-  $embedInfo = @()
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
+
+    if (-not $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
+      $embedInfo = @()
   # 1) Resolve company (optional)
   $matchedCompany = $null
   if ($CompanyName) {
@@ -622,8 +630,16 @@ function Set-HuduArticleFromPDF {
     [bool]$CalculateHashes = $true
   )
 
-  [version]$script:CurrentHuduVersion = $script:CurrentHuduVersion ?? $([version]("$($(get-huduappinfo).version)"))
-  
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
+
+    if (-not $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }  
   if (-not (Test-Path -LiteralPath $PdfPath -PathType Leaf)) { write-warning "NO PDF, $($PdfPath)"; return $null }
 
   $pdfBaseName = [IO.Path]::GetFileNameWithoutExtension($PdfPath)

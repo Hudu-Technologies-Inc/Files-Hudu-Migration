@@ -186,12 +186,9 @@ param(
                     # No companyName => global KB in your New-HuduArticleFromLocalResource logic
                 }
             }
-            write-host "$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
+            write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             [pscustomobject]$result = New-HuduArticleFromLocalResource @articleFromResourceRequest
-            $result = Remove-EmptyPSObjectProperties -InputObject $result
-
-            $result | format-list | Out-String | Write-Host -ForegroundColor Green
-
+            Write-ObjectNonNullProperties -InputObject $result -Title "result from processing $($sourceObject.FullName):"
             $results.Add($result)
 
             Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green
