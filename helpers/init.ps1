@@ -1,8 +1,8 @@
 function Set-HuduInstance {
-    param ([string]$baseUrl,[string]$apiKey)
-    $HuduBaseURL = $baseUrl ?? 
+    param ([string]$HuduBaseUrl,[string]$HuduApiKey)
+    $HuduBaseURL = $HuduBaseUrl ?? 
         $((Read-Host -Prompt 'Set the base domain of your Hudu instance (e.g https://myinstance.huducloud.com)') -replace '[\\/]+$', '') -replace '^(?!https://)', 'https://'
-    $HuduAPIKey = $apiKey ?? "$(read-host "Please Enter Hudu API Key")"
+    $HuduAPIKey = $HuduApiKey ?? "$(read-host "Please Enter Hudu API Key")"
     while ($HuduAPIKey.Length -ne 24) {
         $HuduAPIKey = (Read-Host -Prompt "Get a Hudu API Key from $($settings.HuduBaseDomain)/admin/api_keys").Trim()
         if ($HuduAPIKey.Length -ne 24) {

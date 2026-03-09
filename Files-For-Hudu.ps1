@@ -93,7 +93,7 @@ param(
         $DestinationStrategy = 'SameCompany'; $sameCompanyTarget = $availableCompanies[0];
     }
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
-    if (([string]::IsNullOrWhiteSpace($TargetDocumentDir)) -or (not (Test-Path -LiteralPath $TargetDocumentDir))) {throw "Target document directory '$TargetDocumentDir' does not exist or is invalid."}
+    if (([string]::IsNullOrWhiteSpace($TargetDocumentDir)) -or (-not (Test-Path -LiteralPath $TargetDocumentDir))) {throw "Target document directory '$TargetDocumentDir' does not exist or is invalid."}
     if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}; Get-EnsuredPath -Path $DocConversionTempDir;
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
     if (-not $SourceStrategy) {$SourceStrategy = $(Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel"))}
@@ -124,13 +124,13 @@ param(
         $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
     }
 
-    if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
+    if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or -not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
         Write-Warning "Not enough viable source objects in your target directory after filtering; aborting."
         return
     }
 
     # initialize
-    Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -BaseUrl $HuduBaseUrl -ApiKey $HuduApiKey; Get-HuduVersionCompatible;
+    Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -HuduBaseUrl $HuduBaseUrl -HuduApiKey $HuduApiKey; Get-HuduVersionCompatible;
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
 
@@ -147,7 +147,7 @@ param(
             $DestinationStrategy = 'GlobalKB'
         }
     }
-    $results = New-Object System.Collections.Generic.List[object]
+    $invocationResults = New-Object System.Collections.Generic.List[object]
     $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
 
     # region: main processing loop
@@ -178,23 +178,31 @@ param(
                 }
             }
             write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
-            $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
-            $result.GetEnumerator()
-            $results.Add($result)
+            $fileResult = $null; $success = $null; $articleLevelIssue = $null;
 
-            Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green
+            $fileResult = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            $fileResult.GetEnumerator()
+            $success = [bool]$($null -ne $fileResult -and ([string]::IsNullOrWhiteSpace($fileResult.Error)))
+            Write-Host "Created article from $($sourceObject.FullName)$(if ($true -eq $success){' without apparent issue'})" -ForegroundColor Green
+        } catch {
+            $success = $false
+            $articleLevelIssue = $_.Exception.Message + $fileResult.Error
+        } finally {
+            if ($success -eq $false) {
+                Write-Host "Failed to create article from $($sourceObject.FullName): $($_.Exception.Message)" -ForegroundColor Red
+                $invocationResults.Add([pscustomobject]@{
+                    RequestParams = $articleFromResourceRequest
+                    Company = $articleFromResourceRequest.companyName
+                    Result = $fileResult
+                    Action = 'Error'
+                    Error = $articleLevelIssue
+                })
+            } else {$invocationResults.add($fileResult)}
         }
-        catch {
-            Write-Warning "Failed to create article from $($sourceObject.FullName): $($_.Exception.Message)"
-            $results.Add([pscustomobject]@{
-                Path   = $sourceObject.FullName
-                Error  = $_.Exception.Message
-                Status = 'Failed'
-            })
-        }
+
     }
 
-    Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
+    Write-Host "Completed processing $($invocationResults.Count) items. Results will be written to $invocationResultsFile" -ForegroundColor Cyan
     if ($true -eq $PersistTempfiles) {
         Write-Host "Temporary files have been preserved at $DocConversionTempDir" -ForegroundColor Yellow
     } else {
@@ -203,4 +211,4 @@ param(
     }
 
     $VerbosePreference = 'SilentlyContinue'
-    return $results
+    return $invocationResults
