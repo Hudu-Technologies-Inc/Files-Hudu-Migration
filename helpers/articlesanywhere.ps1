@@ -653,7 +653,7 @@ function Set-HuduArticleFromPDF {
               -CompanyName  $CompanyName `
               -Title        $displayTitle `
               -HtmlContents $pdfData.Html `
-              -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.39.0'))
+              -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
 
   if ($true -eq $includeOriginal){
     New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $newDoc.HuduArticle.Id | Out-Null
