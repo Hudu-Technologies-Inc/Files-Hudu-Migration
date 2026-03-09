@@ -164,7 +164,7 @@ function New-HuduArticleFromLocalResource {
     [string]$companyName=$null,
     [array]$companyDocs=$null,
     [bool]$updateOnMatch=$true,
-    [Parameter(Mandatory)][ValidateSet('date','filehash','none')][string]$UpdateStrategy,
+    [Parameter(Mandatory)][ValidateSet('date','filehash','none')][string]$UpdateStrategy='filehash',
     [bool]$includeOriginals=$true,
     [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
@@ -206,7 +206,6 @@ function New-HuduArticleFromLocalResource {
     $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
     $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
     $results.SourceLastModified = $results.OriginalDoc.LastWriteTimeUtc; Write-Verbose "source document $($results.originalName) last modified (UTC): $($results.SourceLastModified)";
-    $matchKeys = @($results.originalName, $results.OriginalDoc.Name) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique    
     # determine if we're looking at a file or directory and set strategy
     if ($results.OriginalDoc.PSIsContainer) {
         $results.isDirectory = $true
@@ -234,45 +233,71 @@ function New-HuduArticleFromLocalResource {
     $exactMatch = $exactMatch ?? $($companyDocs | Where-Object {$_.name -ieq $results.originalName -or $_.name -ieq $results.OriginalDoc.Name} | Select-Object -First 1)
     $exactMatch = $exactMatch ?? $(if ($true -eq $results.IsGlobalKB) {get-huduarticles -name $results.originalName | where-object {$null -eq $_.company_id}} else {$companyDocs | Where-Object { $_.name -ieq $results.originalName } | Select-Object -First 1})
 
-    if ($null -ne $exactMatch) {
+    if ($exactMatch) {
         $results.MatchedDoc = $exactMatch.article ?? $exactMatch
-        write-info "Exact match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
+            write-info "Exact match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
     } else {
         $MatchedDocs = $companyDocs | Where-Object {
-            $docName = $_.name
-            foreach ($key in $matchKeys) {
-                if ((Test-Equiv -A $docName -B $key) -or (Compare-StringsIgnoring -A $docName -B $key)) {
-                    return $true
-                }
-            }
-            return $false
+            (Test-Equiv -A $_.name -B $results.originalName) -or
+            (Test-Equiv -A $_.name -B $results.OriginalDoc.Name) 
         }
-        $results.MatchedDoc = ($MatchedDocs | Select-Object -First 1)
-        $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc
-        write-info "Fuzzy match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)' matching original name '$($results.originalName)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
+        if ($MatchedDocs) {
+            $results.MatchedDoc = ($MatchedDocs | Select-Object -First 1)
+            $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc
+        }
     }
     if ($null -ne $results.MatchedDoc) {
         if (-not $updateOnMatch) {
             $results.Action = "SkippedMatch(updateOnMatch=false)"; Write-Info -Message $results.Action
             return $results
-        } else {
-            if ($results.UpdateStrategy -eq 'date') {
-                $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -DestUpload $results.MatchedDoc.attachments[0]
-                $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but source is newer; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update." }
-                Write-Info -Message $results.Action
-                if (-not $shouldUpdate) { return $results }
-            } elseif ($results.UpdateStrategy -eq 'filehash') {
-                $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -SourceSha256 $results.FileHash .Hash -DestUpload $results.MatchedDoc.attachments[0]
-                $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but file hash differs; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update." }
-                Write-Info -Message $results.Action
-                if (-not $shouldUpdate) { return $results }
+        } 
+        if ($UpdateStrategy -ieq 'date') {
+            $destUpload = @($results.MatchedDoc.attachments)[0]
+
+            if (-not $destUpload) {
+                Write-Info "Matched article '$($results.MatchedDoc.name)' has no existing attachment metadata; proceeding with update."
+                $shouldUpdate = $true
             } else {
-                # strategy 'none' should have been handled by the earlier check, but just in case:
-                $results.Action = "Matched existing article '$($results.MatchedDoc.name)' but UpdateStrategy is 'none'; skipping update."
-                Write-Info -Message $results.Action
-                return $results
+                $shouldUpdate = Test-ShouldUpdateUpload `
+                    -UpdateOnMatch $updateOnMatch `
+                    -Strategy $results.UpdateStrategy `
+                    -SourceMTimeUtc $results.SourceLastModified `
+                    -DestUpload $destUpload
             }
+
+            $results.Action = if ($shouldUpdate) {
+                "Matched existing article '$($results.MatchedDoc.name)' but source is newer or no dest upload exists; proceeding with update."
+            } else {
+                "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update."
+            }
+
+            Write-Info -Message $results.Action
+            if (-not $shouldUpdate) { return $results }
         }
+        elseif ($UpdateStrategy -ieq 'filehash') {
+            $destUpload = @($results.MatchedDoc.attachments)[0]
+
+            if (-not $destUpload) {
+                Write-Info "Matched article '$($results.MatchedDoc.name)' has no existing attachment metadata; proceeding with update."
+                $shouldUpdate = $true
+            } else {
+                $shouldUpdate = Test-ShouldUpdateUpload `
+                    -UpdateOnMatch $updateOnMatch `
+                    -Strategy $results.UpdateStrategy `
+                    -SourceMTimeUtc $results.SourceLastModified `
+                    -SourceSha256 $results.FileHash `
+                    -DestUpload $destUpload
+            }
+
+            $results.Action = if ($shouldUpdate) {
+                "Matched existing article '$($results.MatchedDoc.name)' but file hash differs or no dest upload exists; proceeding with update."
+            } else {
+                "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update."
+            }
+
+            Write-Info -Message $results.Action
+            if (-not $shouldUpdate) { return $results }
+        }        
     } else {Write-Info "No existing article match found for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) with name matching '$($results.originalName)'. A new article will be created."}
 
       
@@ -328,6 +353,7 @@ function New-HuduArticleFromLocalResource {
             }
         }
     }
+    # make sure results are unwrapped correctly irrespective of the path taken to get here
     $results.ArticleResult = $results.NewDoc
     $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
 
@@ -337,9 +363,10 @@ function New-HuduArticleFromLocalResource {
         return $results
     }
 
+    # process uploads if required
     if ($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) {
-        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
-        if ($existingupload){
+        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and ($_.name -ieq $results.OriginalDoc.Name -or $_.name -ieq $results.originalName)} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
+        if ($null -ne $existingupload){
             Write-Verbose "An existing upload (attachment) was found."
             if ($script:CurrentHuduVersion -lt [version]("2.39.0")){
                 $results.attachmentStatus =  "Existing attachment upload found for article, but current Hudu version $script:CurrentHuduVersion does not support hash comparison. Using existing attachment/upload as-is. Update to hudu version 2.39.0 or newer to enable hash comparison."; Write-Verbose $results.attachmentStatus;

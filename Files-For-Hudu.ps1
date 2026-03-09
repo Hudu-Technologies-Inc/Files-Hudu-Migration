@@ -15,7 +15,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('date','filehash','none')]
-    [string]$UpdateStrategy = 'date',
+    [string]$UpdateStrategy = 'filehash',
 
     # Destination strategy:
     # - VariousCompanies: prompt per-file
