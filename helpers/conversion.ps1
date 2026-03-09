@@ -170,6 +170,8 @@ function New-HuduArticleFromLocalResource {
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
     [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
   )
+    $VerbosePreference = 'Continue'
+
     Get-EnsuredPath -Path $DocConversionTempDir
     $null = Get-EnsuredPath -Path $DocConversionTempDir
 
@@ -181,7 +183,7 @@ function New-HuduArticleFromLocalResource {
     if (-not $script:DateCompareJitterHours) {
         $script:DateCompareJitterHours = [timespan]::FromHours(12)
     }
-    $companyDocs = $null; $MatchedDocs = $null;
+    $MatchedDocs = $null; $exactMatch = $null;
     $results = [pscustomobject]@{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy;}
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; isScript =$null; 
@@ -194,68 +196,85 @@ function New-HuduArticleFromLocalResource {
         return $results
     }
     if (-not ([string]::IsNullOrEmpty($companyName))){
-      $results.Company = $(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies)) ?? $null
+        $results.Company = $(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies)) ?? $null
     }
     $results.IsGlobalKB = [bool]$($null -eq $results.Company)
-    Write-Verbose "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$($results.Company.name)' KB"}) will be target for this article"
+    Write-Info "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$($results.Company.name)' KB"}) will be target for this article"
 
     $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $results.Company.id})
     $results.OriginalDoc = Get-Item -LiteralPath $resourceLocation
     $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
     $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
     $results.SourceLastModified = $results.OriginalDoc.LastWriteTimeUtc; Write-Verbose "source document $($results.originalName) last modified (UTC): $($results.SourceLastModified)";
+    $matchKeys = @($results.originalName, $results.OriginalDoc.Name) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique    
     # determine if we're looking at a file or directory and set strategy
     if ($results.OriginalDoc.PSIsContainer) {
         $results.isDirectory = $true
         $results.Strategy = "user-supplied path appears to be a directory. proccing it as a resource itself (gallery of photos, index of files)"; Write-Info -Message $results.Strategy
-        try {$results.NewDoc = $(
-            if ($null -ne $results.Company) {
+        try {
+            $results.NewDoc = if ($null -ne $results.Company) {
                 Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc -companyName $results.Company.name
-                } else {
+            } else {
                 Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc
-            })} catch {
-                $results.Error="Error creating article from resource folder $_"; return $results 
             }
+            return $results
+        } catch {
+            $results.Error="Error creating article from resource folder $_"
+            return $results 
+        }
     } else {$results.isDirectory = $false}
 
-      $results.Strategy = "user-supplied path appears to be a file. determining strategy for single-file"; Write-Info -Message $results.Strategy
-      $results.AllowedToConvertFile = -not ($DisallowedForConvert -contains $results.originalExt)
-      $results.isPdf        = ($results.originalExt -eq '.pdf')
-      $results.isImage      = ($results.originalExt -in $EmbeddableImageExtensions)
-      $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
-        $results.FileHash = "$(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash"
-        if ($results.originalName -and $companyDocs?.Count) {
+    $results.Strategy = "user-supplied path appears to be a file. determining strategy for single-file"; Write-Info -Message $results.Strategy
+    $results.AllowedToConvertFile = -not ($DisallowedForConvert -contains $results.originalExt)
+    $results.isPdf        = ($results.originalExt -eq '.pdf')
+    $results.isImage      = ($results.originalExt -in $EmbeddableImageExtensions)
+    $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
+    $results.FileHash     = "$($(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash)"
+
+    $exactMatch = $exactMatch ?? $($companyDocs | Where-Object {$_.name -ieq $results.originalName -or $_.name -ieq $results.OriginalDoc.Name} | Select-Object -First 1)
+    $exactMatch = $exactMatch ?? $(if ($true -eq $results.IsGlobalKB) {get-huduarticles -name $results.originalName | where-object {$null -eq $_.company_id}} else {$companyDocs | Where-Object { $_.name -ieq $results.originalName } | Select-Object -First 1})
+
+    if ($null -ne $exactMatch) {
+        $results.MatchedDoc = $exactMatch.article ?? $exactMatch
+        write-info "Exact match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
+    } else {
         $MatchedDocs = $companyDocs | Where-Object {
-            (Test-Equiv -A $_.name -B $results.originalName) -or
-            (Compare-StringsIgnoring -A $_.name -B $results.originalName)
-        }
-
-            if ($MatchedDocs?.Count) {
-            $results.MatchedDoc = $MatchedDocs | Select-Object -First 1; $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc;
-
-            if (-not $updateOnMatch) {
-                $results.Action = "SkippedMatch(updateOnMatch=false)"; Write-Info -Message $results.Action
-                return $results
-            } else {
-                if ($results.UpdateStrategy -eq 'date') {
-                    $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -DestUpload $results.MatchedDoc.attachments[0]
-                    $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but source is newer; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update." }
-                    Write-Info -Message $results.Action
-                    if (-not $shouldUpdate) { return $results }
-                } elseif ($results.UpdateStrategy -eq 'filehash') {
-                    $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -SourceSha256 $results.FileHash .Hash -DestUpload $results.MatchedDoc.attachments[0]
-                    $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but file hash differs; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update." }
-                    Write-Info -Message $results.Action
-                    if (-not $shouldUpdate) { return $results }
-                } else {
-                    # strategy 'none' should have been handled by the earlier check, but just in case:
-                    $results.Action = "Matched existing article '$($results.MatchedDoc.name)' but UpdateStrategy is 'none'; skipping update."
-                    Write-Info -Message $results.Action
-                    return $results
+            $docName = $_.name
+            foreach ($key in $matchKeys) {
+                if ((Test-Equiv -A $docName -B $key) -or (Compare-StringsIgnoring -A $docName -B $key)) {
+                    return $true
                 }
             }
+            return $false
         }
+        $results.MatchedDoc = ($MatchedDocs | Select-Object -First 1)
+        $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc
+        write-info "Fuzzy match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)' matching original name '$($results.originalName)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
     }
+    if ($null -ne $results.MatchedDoc) {
+        if (-not $updateOnMatch) {
+            $results.Action = "SkippedMatch(updateOnMatch=false)"; Write-Info -Message $results.Action
+            return $results
+        } else {
+            if ($results.UpdateStrategy -eq 'date') {
+                $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -DestUpload $results.MatchedDoc.attachments[0]
+                $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but source is newer; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update." }
+                Write-Info -Message $results.Action
+                if (-not $shouldUpdate) { return $results }
+            } elseif ($results.UpdateStrategy -eq 'filehash') {
+                $shouldUpdate = Test-ShouldUpdateUpload -UpdateOnMatch $updateOnMatch -Strategy $results.UpdateStrategy -SourceMTimeUtc $results.SourceLastModified -SourceSha256 $results.FileHash .Hash -DestUpload $results.MatchedDoc.attachments[0]
+                $results.Action = if ($shouldUpdate) { "Matched existing article '$($results.MatchedDoc.name)' but file hash differs; proceeding with update." } else { "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update." }
+                Write-Info -Message $results.Action
+                if (-not $shouldUpdate) { return $results }
+            } else {
+                # strategy 'none' should have been handled by the earlier check, but just in case:
+                $results.Action = "Matched existing article '$($results.MatchedDoc.name)' but UpdateStrategy is 'none'; skipping update."
+                Write-Info -Message $results.Action
+                return $results
+            }
+        }
+    } else {Write-Info "No existing article match found for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) with name matching '$($results.originalName)'. A new article will be created."}
+
       
     try {
 
@@ -294,25 +313,20 @@ function New-HuduArticleFromLocalResource {
             $results.Images = Get-ChildItem -LiteralPath $results.outputDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' } | Select-Object -ExpandProperty FullName
             $results.LoggedMessages += "$($results.Images.count) images extracted during conversion."
             $results.NewDoc = Set-HuduArticleFromHtml -ImagesArray ($results.Images ?? @()) -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -HtmlContents (Get-Content -Encoding utf8 -Raw $results.htmlpath)  -CalculateHashes $results.CalculateEmbedHashes
-            $results.NewDoc = $results.NewDoc.HuduArticle
     # standalone article-as-attachment process [not pdf or convertable]
       } else {
         $results.Strategy = "Processing as Attachment to Reference Article, as file cannot be converted and $(if ($null -ne $results.MatchedDoc){"Article with id $($results.MatchedDoc.id) will be updated"} else {"a new article will be created"})."; Write-Info -Message $results.Strategy
-
-        $results.NewDoc = $results.MatchedDoc ?? 
-            $(if ($true -eq $results.IsGlobalKB) {
+        if ($null -ne $results.MatchedDoc){
+            $existingUpload = get-huduuploads | where-object {$_.uploadable_id -eq $results.MatchedDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingUpload = $existingUpload.upload ?? $existingUpload;            
+            $results.NewDoc = $results.MatchedDoc
+        }
+        if (-not $results.NewDoc) {
+            $results.NewDoc = if ($results.IsGlobalKB) {
                 New-HuduArticle -name $results.originalName -content "Attaching Upload"
             } else {
-                New-HuduArticle -name $results.originalName -companyId $matchedCompany.id -content "Attaching Upload"
-            })
-        $results.NewDoc = $results.NewDoc.article ?? $results.NewDoc
-        $results.Upload = New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName; $results.Upload = $results.Upload.upload ?? $results.Upload;
-        $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
-            Set-HuduArticle -id $results.NewDoc.id -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
-        } else {
-            Set-HuduArticle -id $results.NewDoc.id -companyId $matchedCompany.id -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
+                New-HuduArticle -name $results.originalName -companyId $results.Company.id -content "Attaching Upload"
+            }
         }
-        return $results
     }
     $results.ArticleResult = $results.NewDoc
     $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
@@ -323,7 +337,7 @@ function New-HuduArticleFromLocalResource {
         return $results
     }
 
-    if ($true -eq $includeOriginals -or $true -eq $results.isScript) {
+    if ($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) {
         $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
         if ($existingupload){
             Write-Verbose "An existing upload (attachment) was found."
@@ -343,7 +357,6 @@ function New-HuduArticleFromLocalResource {
                     } else {
                         $results.attachmentStatus = "Existing attachment upload appears newest. No need to replace."; Write-Verbose $results.attachmentStatus;
                         $results.Upload = $existingupload
-                        return $results
                     }
                 }
             }
@@ -351,11 +364,19 @@ function New-HuduArticleFromLocalResource {
         $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
         $results.Upload = $results.Upload.upload ?? $results.Upload
     }
-
-        return $results
+    if ($false -eq $results.AllowedToConvertFile){
+        $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
+            Set-HuduArticle -id $results.NewDoc.id -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
+        } else {
+            Set-HuduArticle -id $results.NewDoc.id -companyId $matchedCompany.id -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
+        }        
+    }
+    return $results
     } catch {
         $results.Error =  "Article from Resource Error-- $_. $($_.Exception.Message) $($_.ScriptStackTrace)"; Write-Error $results.Error
         return $results
+    } finally {
+        $VerbosePreference = 'SilentlyContinue'
     }
 }
     

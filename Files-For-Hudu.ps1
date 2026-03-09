@@ -36,7 +36,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$IncludeDirectories,
 
-    # Whether to also upload original docs (you already had this; still exposed for future logic)
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
 
