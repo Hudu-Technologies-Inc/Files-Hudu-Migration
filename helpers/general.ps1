@@ -216,7 +216,7 @@ function Compare-UploadHashWithFile {
         $uploadHash = (Get-FileHash -LiteralPath (Resolve-Path $uploadEntry.LocalPath).Path -Algorithm SHA256).Hash
         $samefile = [bool]$("$uploadHash" -ieq "$localHash")
         if ($false -eq $samefile) {
-            write-verbose "Hash mismatch between local file and existing upload (UploadId: $UploadId). Local: $localHash, Upload: $uploadHash"
+            Write-info "Hash mismatch between local file and existing upload (UploadId: $UploadId). Local: $localHash, Upload: $uploadHash"
         }
 
 
@@ -403,7 +403,7 @@ $propertyDump
         }
     }
 
-        write-verbose "$logContent"
+        Write-info "$logContent"
 }
 
 
@@ -447,22 +447,6 @@ function Get-PercentDone {
     $rounded = [Math]::Round($percentDone, 2)
     return $rounded
 }   
-function Set-PrintAndLog {
-    param (
-        [string]$message,
-        [Parameter()]
-        [Alias("ForegroundColor")]
-        [ValidateSet("Black","DarkBlue","DarkGreen","DarkCyan","DarkRed","DarkMagenta","DarkYellow","Gray","DarkGray","Blue","Green","Cyan","Red","Magenta","Yellow","White")]
-        [string]$Color
-    )
-    $logline = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $message"
-    if ($Color) {
-        write-verbose $logline
-    } else {
-        write-verbose $logline
-    }
-    Add-Content -Path $LogFile -Value $logline
-}
 function Select-ObjectFromList($objects, $message, $inspectObjects = $false, $allowNull = $false) {
     $validated = $false
     while (-not $validated) {
@@ -515,7 +499,7 @@ function Get-YesNoResponse($message) {
         } elseif ($response -eq 'n' -or $response -eq 'no') {
             return $false
         } else {
-            Set-PrintAndLog -message "Invalid input. Please enter 'y' for Yes or 'n' for No."
+            Write-Info -message "Invalid input. Please enter 'y' for Yes or 'n' for No."
         }
     }
     while ($true)

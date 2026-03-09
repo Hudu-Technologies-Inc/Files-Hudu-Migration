@@ -14,7 +14,7 @@ param(
     [bool]$updateFilesOnMatch=$true,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('date','filehash','none')]
+    [ValidateSet('filehash','date','skip','replace')]
     [string]$UpdateStrategy = 'filehash',
 
     # Destination strategy:
@@ -31,10 +31,6 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('Recurse','TopLevel')]
     [string]$SourceStrategy,
-
-    # Include directories as "resources" to convert
-    [Parameter(Mandatory = $false)]
-    [switch]$IncludeDirectories,
 
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
@@ -54,9 +50,10 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$PersistTempfiles = $false
 )
-    $WorkDir = $PSScriptRoot
     $VerbosePreference = 'SilentlyContinue'
-    
+    $WorkDir = $PSScriptRoot
+    [long]$MaxItemBytes = 100MB
+    $cacheValidityMinutes = 10
 
     # Load helper scripts
     foreach ($file in (Get-ChildItem -Path (Join-Path $WorkDir "helpers") -Filter "*.ps1" -File | Sort-Object Name)) {
@@ -71,26 +68,39 @@ param(
         $DisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
         $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
     }
-
-    # Ensure or prompt for params and directories
-    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
-    Get-EnsuredPath -Path $DocConversionTempDir
-    if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
-    if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
-    if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
+    
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
     if (-not $HuduApiKey) {$HuduApiKey = Read-Host "Enter Hudu API Key"; clear-host;}
+    # Pre-Flight checks and parameter fallbacks
+    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
+    
+    if ($script:CurrentHuduVersion -lt [version]("2.41.0") -and $UpdateStrategy -eq 'filehash') {
+        Write-Warning "Your Hudu version ($script:CurrentHuduVersion) does not support filehash-based updates; falling back to date-based updates."
+        $UpdateStrategy = 'date'
+    }
+    if (@('filehash','date','replace') -notcontains $UpdateStrategy) {$updateFilesOnMatch = $false; $UpdateStrategy = 'none'} else {$updateFilesOnMatch = $true}
+
+    if ($DestinationStrategy -ne 'GlobalKB' -and ($null -eq $companiesLastIndexedDate -or $null -eq $availableCompanies -or (Get-Date) -gt $companiesLastIndexedDate.AddMinutes($cacheValidityMinutes))) {
+        write-host "$(if ($null -eq $companiesLastIndexedDate) {'fetching + caching'} else {"refreshing company list from Hudu... company index is good for $($cacheValidityMinutes) minutes"})" -ForegroundColor DarkGray
+        $companiesLastIndexedDate = Get-Date; $availableCompanies = Get-HuduCompanies;
+    }
+    if ($DestinationStrategy -ne 'GlobalKB' -and (-not $availableCompanies -or $availableCompanies.Count -lt 1)) {
+        Write-Warning "No companies found in Hudu; defaulting to Global KB strategy."
+        $DestinationStrategy = 'GlobalKB'; $availableCompanies = @();
+    }
+    if ($availableCompanies.count -eq 1 -and $DestinationStrategy -eq 'VariousCompanies') {
+        Write-Host "Only one company found in Hudu; defaulting to SameCompany strategy with that company." -ForegroundColor Yellow
+        $DestinationStrategy = 'SameCompany'; $sameCompanyTarget = $availableCompanies[0];
+    }
+    if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
+    if (([string]::IsNullOrWhiteSpace($TargetDocumentDir)) -or (not (Test-Path -LiteralPath $TargetDocumentDir))) {throw "Target document directory '$TargetDocumentDir' does not exist or is invalid."}
+    if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}; Get-EnsuredPath -Path $DocConversionTempDir;
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
-    if (-not $SourceStrategy) {$SourceStrategy = $(if ($IncludeDirectories.IsPresent) {'TopLevel'} else {Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")})}
-    [long]$MaxItemBytes = 100MB
+    if (-not $SourceStrategy) {$SourceStrategy = $(Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel"))}
 
     # check requested documents
-    Write-Host "Discovering source documents with strategy $($SourceStrategy)..." -ForegroundColor Cyan    
-    if ($IncludeDirectories.IsPresent -and $SourceStrategy -ne 'TopLevel') {
-        $SourceStrategy = 'TopLevel'; Write-Host "Directories will be included, however recursion is limited to TopLevel when including directories." -ForegroundColor Yellow;
-    }    
-    
-    if ($SourceStrategy -eq 'TopLevel') {
+    Write-Host "Discovering source documents with strategy $($SourceStrategy)..." -ForegroundColor Cyan
+        if ($SourceStrategy -eq 'TopLevel') {
         $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse:$false
     } else {
         try {
@@ -107,13 +117,8 @@ param(
         return $true
     }
 
-    if ($IncludeDirectories.IsPresent) {
-        $sourceObjects = $sourceObjects |
-            Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) }
-    } else {
-        $sourceObjects = $sourceObjects |
-            Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
-    }
+    $sourceObjects = $sourceObjects | Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
+
     if (-not [string]::IsNullOrEmpty($filter)) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
         $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
@@ -122,7 +127,7 @@ param(
     if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
         Write-Warning "Not enough viable source objects in your target directory after filtering; aborting."
         return
-    }    
+    }
 
     # initialize
     Get-PSVersionCompatible; Get-HuduModule; Set-HuduInstance -BaseUrl $HuduBaseUrl -ApiKey $HuduApiKey; Get-HuduVersionCompatible;
@@ -134,7 +139,7 @@ param(
     $sameCompanyTarget = $null
     if ($DestinationStrategy -eq 'SameCompany') {
         $sameCompanyTarget = Select-ObjectFromList `
-            -Objects (Get-HuduCompanies) `
+            -Objects $availableCompanies `
             -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
 
         if (-not $sameCompanyTarget) {
@@ -159,36 +164,19 @@ param(
             $articleFromResourceRequest.includeOriginals = $IncludeOriginals ?? $true
             if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
-            if ($true -eq $updateFilesOnMatch) {
-                $articleFromResourceRequest.updateOnMatch = $true
-                $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
-            } else {
-                $articleFromResourceRequest.UpdateStrategy = 'none'
-                $articleFromResourceRequest.updateOnMatch = $false
-            }
+            $articleFromResourceRequest.updateOnMatch = $updateFilesOnMatch
+            $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
 
             switch ($DestinationStrategy) {
                 'VariousCompanies' {
-                    $target = Select-ObjectFromList `
-                        -Objects (Get-HuduCompanies) -allownull $true `
-                        -Message "Which company to attribute `"$($articleFromResourceRequest.ResourceLocation)`" to? (Cancel for Global KB)"
-
-                    if ($target -and $target.name) {
-                        $articleFromResourceRequest.companyName = $target.name
-                    }
+                    $target = Select-ObjectFromList -Objects (Get-HuduCompanies) -allownull $true -Message "Which company to attribute `"$($articleFromResourceRequest.ResourceLocation)`" to? (0Cancel for Global KB)"
+                    if ($target -and $target.name) {$articleFromResourceRequest.companyName = $target.name} else {write-host "No company selected; treating as Global KB for this file." -ForegroundColor Yellow}
                 }
 
                 'SameCompany' {
-                    if ($sameCompanyTarget -and $sameCompanyTarget.name) {
-                        $articleFromResourceRequest.companyName = $sameCompanyTarget.name
-                    }
-                }
-
-                'GlobalKB' {
-                    # No companyName => global KB in your New-HuduArticleFromLocalResource logic
+                    if ($sameCompanyTarget -and $sameCompanyTarget.name) {$articleFromResourceRequest.companyName = $sameCompanyTarget.name} else {write-host "Single company target does not seem valid; treating as Global KB for this file." -ForegroundColor Yellow}
                 }
             }
-            # $VerbosePreference = 'Continue'
             write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
             $result.GetEnumerator()
@@ -214,4 +202,5 @@ param(
         Remove-Item -LiteralPath $DocConversionTempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+    $VerbosePreference = 'SilentlyContinue'
     return $results
