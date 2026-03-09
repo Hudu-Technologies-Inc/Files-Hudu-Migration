@@ -15,7 +15,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('date','filehash','none')]
-    [string]$UpdateStrategy = 'date',
+    [string]$UpdateStrategy = 'filehash',
 
     # Destination strategy:
     # - VariousCompanies: prompt per-file
@@ -36,7 +36,6 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$IncludeDirectories,
 
-    # Whether to also upload original docs (you already had this; still exposed for future logic)
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
 
@@ -56,6 +55,9 @@ param(
     [bool]$PersistTempfiles = $false
 )
     $WorkDir = $PSScriptRoot
+    $VerbosePreference = 'SilentlyContinue'
+    
+
     # Load helper scripts
     foreach ($file in (Get-ChildItem -Path (Join-Path $WorkDir "helpers") -Filter "*.ps1" -File | Sort-Object Name)) {
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
@@ -71,6 +73,7 @@ param(
     }
 
     # Ensure or prompt for params and directories
+    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
     Get-EnsuredPath -Path $DocConversionTempDir
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
@@ -140,6 +143,7 @@ param(
         }
     }
     $results = New-Object System.Collections.Generic.List[object]
+    $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
 
     # region: main processing loop
     foreach ($sourceObject in $sourceObjects) {
@@ -184,8 +188,10 @@ param(
                     # No companyName => global KB in your New-HuduArticleFromLocalResource logic
                 }
             }
-            write-host "$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
+            # $VerbosePreference = 'Continue'
+            write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
+            $result.GetEnumerator()
             $results.Add($result)
 
             Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green

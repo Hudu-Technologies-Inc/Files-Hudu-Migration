@@ -13,6 +13,142 @@ function Normalize-Text {
     }
     ($sb.ToString()).Normalize([System.Text.NormalizationForm]::FormC)
 }
+
+function Remove-NullHashtableValues {
+    param([hashtable]$Hashtable)
+
+    foreach ($key in $Hashtable.Keys.Clone()) {
+        if ($null -eq $Hashtable[$key]) {
+            $Hashtable.Remove($key)
+        }
+    }
+
+    return $Hashtable
+}
+
+function Remove-EmptyPSObjectProperties {
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$InputObject
+    )
+
+    $out = [pscustomobject]@{}
+
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        $value = $prop.Value
+
+        $isEmpty = (
+            $null -eq $value -or
+            ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) -or
+            ($value -is [System.Collections.ICollection] -and $value.Count -eq 0)
+        )
+
+        if (-not $isEmpty) {
+            $out | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $value
+        }
+    }
+
+    return $out
+}
+
+function Get-MetadataArticleBlock {
+    param ([string]$filePath)
+    $file = Get-Item -LiteralPath $filePath
+    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    $html = @"
+<div>
+<b>Metadata</b>
+<ul>
+  <li>Original Filename: $($file.Name)</li>
+  <li>Source Directory: $($file.DirectoryName)</li>
+  <li>FileHash (SHA256): $hash</li>
+  <li>Last Modified (UTC): $($file.LastWriteTimeUtc)</li>
+</ul>
+</div>
+"@
+    return $html
+}
+
+function Write-ObjectNonNullProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [psobject]$InputObject,
+
+        [string]$Title = $null
+    )
+
+    if ($Title) {
+        Write-Host "`n=== $Title ===" -ForegroundColor Cyan
+    }
+
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        $value = $prop.Value
+
+        $isEmpty = (
+            $null -eq $value -or
+            ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) -or
+            ($value -is [System.Collections.ICollection] -and $value.Count -eq 0)
+        )
+
+        if (-not $isEmpty) {
+            Write-Host ("{0,-24}: {1}" -f $prop.Name, $value) -ForegroundColor Gray
+        }
+    }
+}
+function Write-InspectObject {
+    param (
+        [object]$object,
+        [int]$Depth = 32,
+        [int]$MaxLines = 16
+    )
+    $stringifiedObject = $null
+    if ($null -eq $object) {
+        return "Unreadable Object (null input)"
+    }
+    # Try JSON
+    $stringifiedObject = try {
+        $json = $object | ConvertTo-Json -Depth $Depth -ErrorAction Stop
+        "# Type: $($object.GetType().FullName)`n$json"
+    } catch { $null }
+    # Try Format-Table
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $object | Format-Table -Force | Out-String
+        } catch { $null }
+    }
+    # Try Format-List
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $object | Format-List -Force | Out-String
+        } catch { $null }
+    }
+    # Fallback to manual property dump
+    if (-not $stringifiedObject) {
+        $stringifiedObject = try {
+            $props = $object | Get-Member -MemberType Properties | Select-Object -ExpandProperty Name
+            $lines = foreach ($p in $props) {
+                try {
+                    "$p = $($object.$p)"
+                } catch {
+                    "$p = <unreadable>"
+                }
+            }
+            "# Type: $($object.GetType().FullName)`n" + ($lines -join "`n")
+        } catch {
+            "Unreadable Object"
+        }
+    }
+    if (-not $stringifiedObject) {
+        $stringifiedObject =  try {"$($($object).ToString())"} catch {$null}
+    }
+    # Truncate to max lines if necessary
+    $lines = $stringifiedObject -split "`r?`n"
+    if ($lines.Count -gt $MaxLines) {
+        $lines = $lines[0..($MaxLines - 1)] + "... (truncated)"
+    }
+    return $lines -join "`n"
+}
 function Get-HTMLTemplatedScriptContent {
 
     [CmdletBinding()]
@@ -35,24 +171,11 @@ function Get-HTMLTemplatedScriptContent {
     $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
     $encoded = [System.Net.WebUtility]::HtmlEncode($content)
 
-    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
-
     $html = @"
 <h2>$Heading</h2>
-
 <pre><code>$encoded</code></pre>
-
 <hr>
-
-<div>
-<b>Metadata</b>
-<ul>
-  <li>Original Filename: $($file.Name)</li>
-  <li>Source Directory: $($file.DirectoryName)</li>
-  <li>FileHash (SHA256): $hash</li>
-  <li>Last Modified (UTC): $($file.LastWriteTimeUtc)</li>
-</ul>
-</div>
+$(Get-MetadataArticleBlock -filePath $file.FullName)
 "@
 
     if ($OutputPath) {
@@ -67,6 +190,49 @@ function Get-HTMLTemplatedScriptContent {
 
     return $html
 }
+
+function Compare-UploadHashWithFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [int]$UploadId,
+
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [Alias('path','file','localpath','filepath')]
+        [string]$LocalFile
+    )
+
+    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid())))
+
+    try {
+        $uploadEntry = Get-HuduUploads -Download -Id $UploadId -OutDir $tempDir
+        $uploadEntry = $uploadEntry.Upload ?? $uploadEntry
+        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path $LocalFile).Path       -Algorithm SHA256).Hash
+        if ([string]::isnullorempty($uploadEntry.LocalPath) -or [string]::isnullorempty($localHash)){
+            return @{SameFile = $false; LocalHash = $localHash; uploadHash = $null }
+        }
+
+        $uploadHash = (Get-FileHash -LiteralPath (Resolve-Path $uploadEntry.LocalPath).Path -Algorithm SHA256).Hash
+        $samefile = [bool]$("$uploadHash" -ieq "$localHash")
+        if ($false -eq $samefile) {
+            write-verbose "Hash mismatch between local file and existing upload (UploadId: $UploadId). Local: $localHash, Upload: $uploadHash"
+        }
+
+
+        @{
+            SameFile   = $samefile
+            UploadHash = $uploadHash
+            LocalHash  = $localHash
+        }
+    }
+    finally {
+        if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Compare-StringsIgnoring {
     [CmdletBinding()]
     param(
@@ -139,7 +305,7 @@ function Get-Similarity {
 function Get-SimilaritySafe { param([string]$A,[string]$B)
     if ([string]::IsNullOrWhiteSpace($A) -or [string]::IsNullOrWhiteSpace($B)) { return 0.0 }
     $score = Get-Similarity $A $B
-    write-host "$a ... $b SCORED $score"
+    write-verbose "$a ... $b SCORED $score"
     return $score
 }
 
@@ -176,8 +342,8 @@ function Get-EnsuredPath {
     if (-not (Test-Path $outpath)) {
         Get-ChildItem -Path "$outpath" -File -Recurse -Force | Remove-Item -Force
         New-Item -ItemType Directory -Path $outpath -Force -ErrorAction Stop | Out-Null
-        write-host "path is now present: $outpath"
-    } else {write-host "path is present: $outpath"}
+        write-verbose "path is now present: $outpath"
+    } else {write-verbose "path is present: $outpath"}
     return $outpath
 }
 
@@ -231,17 +397,13 @@ $propertyDump
         $fullPath = Join-Path $ErroredItemsFolder $filename
         Set-Content -Path $fullPath -Value $logContent -Encoding UTF8
         if ($Color) {
-            Write-Host "Error written to $fullPath" -ForegroundColor $Color
+            write-verbose "Error written to $fullPath"
         } else {
-            Write-Host "Error written to $fullPath"
+            write-verbose "Error written to $fullPath"
         }
     }
 
-    if ($Color) {
-        Write-Host "$logContent" -ForegroundColor $Color
-    } else {
-        Write-Host "$logContent"
-    }
+        write-verbose "$logContent"
 }
 
 
@@ -260,7 +422,7 @@ function Save-HtmlSnapshot {
 
     try {
         $Content | Out-File -FilePath $path -Encoding UTF8
-        Write-Host "Saved HTML snapshot: $path"
+        write-verbose "Saved HTML snapshot: $path"
     } catch {
         Write-ErrorObjectsToFile -Name "$($_.safeTitle ?? "unnamed")" -ErrorObject @{
             Error       = $_
@@ -295,37 +457,52 @@ function Set-PrintAndLog {
     )
     $logline = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $message"
     if ($Color) {
-        Write-Host $logline -ForegroundColor $Color
+        write-verbose $logline
     } else {
-        Write-Host $logline
+        write-verbose $logline
     }
     Add-Content -Path $LogFile -Value $logline
 }
-function Select-ObjectFromList($objects,$message,$allowNull = $false) {
-    $validated=$false
-    while ($validated -eq $false){
-        if ($allowNull -eq $true) {
+function Select-ObjectFromList($objects, $message, $inspectObjects = $false, $allowNull = $false) {
+    $validated = $false
+    while (-not $validated) {
+        if ($allowNull) {
             Write-Host "0: None/Custom"
         }
+
         for ($i = 0; $i -lt $objects.Count; $i++) {
             $object = $objects[$i]
-            if ($null -ne $object.OptionMessage) {
-                Write-Host "$($i+1): $($object.OptionMessage)"
+
+            $displayLine = if ($inspectObjects) {
+                "$($i+1): $(Write-InspectObject -object $object)"
+            } elseif ($null -ne $object.OptionMessage) {
+                "$($i+1): $($object.OptionMessage)"
             } elseif ($null -ne $object.name) {
-                Write-Host "$($i+1): $($object.name)"
+                "$($i+1): $($object.name)"
             } else {
-                Write-Host "$($i+1): $($object)"
+                "$($i+1): $($object)"
             }
+
+            Write-Host $displayLine -ForegroundColor $(if ($i % 2 -eq 0) { 'Cyan' } else { 'Yellow' })
         }
+
         $choice = Read-Host $message
-        if ($null -eq $choice -or $choice -lt 0 -or $choice -gt $objects.Count +1) {
-            Set-PrintAndLog -message "Invalid selection. Please enter a number from above"
+
+        if (-not ($choice -as [int])) {
+            Write-Host "Invalid input. Please enter a number." -ForegroundColor Red
+            continue
         }
-        if ($choice -eq 0 -and $true -eq $allowNull) {
+
+        $choice = [int]$choice
+
+        if ($choice -eq 0 -and $allowNull) {
             return $null
         }
-        if ($null -ne $objects[$choice - 1]){
+
+        if ($choice -ge 1 -and $choice -le $objects.Count) {
             return $objects[$choice - 1]
+        } else {
+            Write-Host "Invalid selection. Please enter a number from the list." -ForegroundColor Red
         }
     }
 }
