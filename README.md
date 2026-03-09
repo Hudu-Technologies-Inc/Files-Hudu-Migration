@@ -40,7 +40,6 @@ This project serves as a **safe foundation** for:
 | **filter** | Case-insensitive file or directory filter. Supports wildcards (e.g., `*.pdf`, `keep*`). |
 | **DestinationStrategy** | Determines how articles are added to Hudu: `GlobalKb`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
 | **SourceStrategy** | Controls recursion: use `Recurse` to search subdirectories; omit to stay at a single level (will prompt if missing). |
-| **IncludeDirectories** | Whether to treat directories as a resource. Recommended when *not* using recursive source strategy. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
@@ -69,11 +68,6 @@ This project serves as a **safe foundation** for:
 . .\Files-For-Hudu.ps1 -TargetDocumentDir X:\Billing\ -SourceStrategy Recurse -Filter "*.docx"
 ```
 
-#### Every folder has various documents for a given company. Upload documents and create single 'directory listing' of all files as an article
-```powershell
-. .\Files-For-Hudu.ps1 -TargetDocumentDir Z:\Companies\ -SourceStrategy TopLevel -IncludeDirectories -DestinationStrategy 'VariousCompanies'
-```
-
 #### Adding Articles for Critical PNG images on a Digital Camera
 ```powershell
 . .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
@@ -84,19 +78,6 @@ This project serves as a **safe foundation** for:
 ## Document Conversion and Resulting Types of Articles
 
 It all comes down to specified resource... We'll iterate through the specified resource if it's a directory and handle every file or directory in the best way possible. 
-
-### Directory Listing article
-Requirement - *the specified resource is a directory containing at least one file under 100mb*
-
-if directory is provided as a resource, any images in directory are uploaded and placed into a 'gallery' section, each linked to the upload object in Hudu.
-
-Any non-image items within directory resource are uploaded (if under 100mb) and also linked in a section, below
-<img width="617" height="971" alt="image" src="https://github.com/user-attachments/assets/38335c2f-fc6d-4f41-b8b3-84ce5f6d938b" />
-
-If chosen directory does not include images, you just get an article with a link to attached files
-<img width="921" height="244" alt="image" src="https://github.com/user-attachments/assets/2c86a1f6-b6ef-4a9a-8f37-5e6b428f1b5d" />
-
-To enable Directory Listing option, you can include the `-IncludeDirectories` switch in your command. Be wary of using this in conjunction with -Recurse param, as you might get more than you bargained for. Best to use these in a mutually-exclusive manner.
 
 ### PDF Format
 
