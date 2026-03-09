@@ -278,16 +278,16 @@ function New-HuduArticleFromLocalResource {
         $results.Strategy = "Processing as singular file to convert to and attach as Article."; Write-Info -Message $results.Strategy
             $results.outputDir = Join-Path $DocConversionTempDir ([guid]::NewGuid().ToString())
             $null = New-Item -ItemType Directory -Path $results.outputDir -Force
-
-            $localIn = Join-Path $results.outputDir $doc.Name
+            $localIn = Join-Path $results.outputDir $results.OriginalDoc.Name
             Copy-Item -LiteralPath $results.OriginalDoc.FullName -Destination $localIn -Force
-
+            $VerbosePreference = 'Continue'
             $results.htmlpath = Convert-WithLibreOffice -InputFile $localIn -OutputDir $results.outputDir -SofficePath $sofficePath
+            $VerbosePreference = 'SilentlyContinue'
             if ([string]::IsNullOrWhiteSpace($results.htmlpath) -or -not (Test-Path -LiteralPath $results.htmlpath)) {
                 $results.htmlpath = get-childitem -Path $results.outputDir -Filter "*.xhtml" -File | Select-Object -First 1
                 $results.htmlpath = $results.htmlpath ?? $(get-childitem -Path $results.outputDir -Filter "*.html" -File | Select-Object -First 1)
             }
-            if ([string]::IsNullOrWhiteSpace($results.htmlpath) -or -not (Test-Path -LiteralPath $results.htmlpath)) {
+            if ([string]::IsNullOrWhiteSpace($results.htmlpath)) {
                 $results.Error = "Conversion to HTML failed for $($results.OriginalDoc.FullName); no HTML output found.";
                 return $results
             }
@@ -365,7 +365,14 @@ function Convert-WithLibreOffice {
         [string]$outputDir,
         [string]$sofficePath
     )
+    if (-not (Test-Path -LiteralPath $inputFile)) {
+        throw "Input path does not exist: $inputFile"
+    }
 
+    $item = Get-Item -LiteralPath $inputFile -ErrorAction Stop
+    if ($item.PSIsContainer) {
+        throw "Convert-WithLibreOffice expected a file but received a directory: $inputFile"
+    }
     try {
         $extension = [System.IO.Path]::GetExtension($inputFile).ToLowerInvariant()
         $baseName = [System.IO.Path]::GetFileNameWithoutExtension($inputFile)
@@ -401,9 +408,7 @@ function Convert-WithLibreOffice {
             $intermediatePath = Join-Path $outputDir "$baseName.$intermediateExt"
             Write-Verbose "Step 1: Converting to .$intermediateExt..." 
 
-            Start-Process -FilePath "$sofficePath" `
-                -ArgumentList "--headless", "--convert-to", $intermediateExt, "--outdir", "`"$outputDir`"", "`"$inputFile`"" `
-                -Wait -NoNewWindow
+            Start-Process -FilePath "$sofficePath" -ArgumentList "--headless", "--convert-to", $intermediateExt, "--outdir", "`"$outputDir`"", "`"$inputFile`"" -Wait -NoNewWindow
 
             if (-not (Test-Path $intermediatePath)) {
                 throw "$intermediateExt conversion failed for $inputFile"
@@ -415,9 +420,7 @@ function Convert-WithLibreOffice {
 
         Write-Verbose "Step $(if ($intermediateExt) {'2'} else {'1'}): Converting .$intermediateExt to XHTML..."
 
-        Start-Process -FilePath "$sofficePath" `
-            -ArgumentList "--headless", "--convert-to", "xhtml", "--outdir", "`"$outputDir`"", "`"$intermediatePath`"" `
-            -Wait -NoNewWindow
+        Start-Process -FilePath "$sofficePath" -ArgumentList "--headless", "--convert-to", "xhtml", "--outdir", "`"$outputDir`"", "`"$intermediatePath`"" -Wait -NoNewWindow
 
         $htmlPath = Join-Path $outputDir "$baseName.xhtml"
 
