@@ -125,7 +125,7 @@ param(
     }    
 
     # initialize
-    Get-PSVersionCompatible; Set-HuduModuleInitialized;
+    Get-PSVersionCompatible; Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey;
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
 
