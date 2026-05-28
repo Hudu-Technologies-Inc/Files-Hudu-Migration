@@ -52,7 +52,21 @@ param(
     [int]$MaxDepth = 5,
 
     [Parameter(Mandatory = $false)]
-    [bool]$PersistTempfiles = $false
+    [bool]$PersistTempfiles = $false,
+    [Parameter(Mandatory = $false)]
+    [string]$HuduBaseUrl,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HuduApiKey,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SameCompanyName,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$ConvertExtensions = @(),
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$UploadAsArticleExtensions = @()
 )
     $WorkDir = $PSScriptRoot
     $VerbosePreference = 'SilentlyContinue'
@@ -72,8 +86,22 @@ param(
         $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
     }
 
+    function Normalize-ExtensionList {
+        param([string[]]$Extensions)
+        @($Extensions) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object {
+                $ext = "$_".Trim().ToLowerInvariant()
+                if (-not $ext.StartsWith(".")) { $ext = ".$ext" }
+                $ext
+            } |
+            Select-Object -Unique
+    }
+
+    $ConvertExtensions = @(Normalize-ExtensionList -Extensions $ConvertExtensions)
+    $UploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $UploadAsArticleExtensions)
+
     # Ensure or prompt for params and directories
-    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
     Get-EnsuredPath -Path $DocConversionTempDir
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
@@ -125,7 +153,9 @@ param(
     }    
 
     # initialize
-    Get-PSVersionCompatible; Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey;
+    Get-PSVersionCompatible
+    $currentVersionResult = Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey
+    [version]$script:CurrentHuduVersion = [version]("$($currentVersionResult | Select-Object -Last 1)")
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
 
@@ -133,9 +163,23 @@ param(
     # region: destination company strategy
     $sameCompanyTarget = $null
     if ($DestinationStrategy -eq 'SameCompany') {
-        $sameCompanyTarget = Select-ObjectFromList `
-            -Objects (Get-HuduCompanies) `
-            -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
+        $companies = @(Get-HuduCompanies)
+        if (-not [string]::IsNullOrWhiteSpace($SameCompanyName)) {
+            $sameCompanyTarget = $companies |
+                Where-Object { $_.name -ieq $SameCompanyName -or $_.nickname -ieq $SameCompanyName } |
+                Select-Object -First 1
+            if (-not $sameCompanyTarget) {
+                $sameCompanyTarget = ChoseBest-ByName -Name $SameCompanyName -choices $companies
+            }
+            if (-not $sameCompanyTarget) {
+                Write-Warning "Could not match SameCompanyName '$SameCompanyName' to a Hudu company; choose from the list."
+            }
+        }
+        if (-not $sameCompanyTarget) {
+            $sameCompanyTarget = Select-ObjectFromList `
+                -Objects $companies `
+                -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
+        }
 
         if (-not $sameCompanyTarget) {
             Write-Host "No company selected; treating as Global KB." -ForegroundColor Yellow
@@ -159,6 +203,28 @@ param(
             $articleFromResourceRequest.includeOriginals = $IncludeOriginals ?? $true
             if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
+            $sourceExtension = if ($sourceObject.PSIsContainer) { "" } else { [IO.Path]::GetExtension($sourceObject.Name).ToLowerInvariant() }
+            $effectiveDisallowedForConvert = [System.Collections.ArrayList]@($DisallowedForConvert ?? @())
+            $effectiveEmbeddableImageExtensions = @($EmbeddableImageExtensions ?? @())
+            if (-not [string]::IsNullOrWhiteSpace($sourceExtension)) {
+                $forceUpload = ($UploadAsArticleExtensions -contains $sourceExtension) -or (
+                    $ConvertExtensions.Count -gt 0 -and -not ($ConvertExtensions -contains $sourceExtension)
+                )
+                if ($forceUpload) {
+                    if (-not ($effectiveDisallowedForConvert -contains $sourceExtension)) {
+                        [void]$effectiveDisallowedForConvert.Add($sourceExtension)
+                    }
+                    $effectiveEmbeddableImageExtensions = @(
+                        $effectiveEmbeddableImageExtensions | Where-Object { "$_".ToLowerInvariant() -ne $sourceExtension }
+                    )
+                } elseif ($ConvertExtensions.Count -gt 0) {
+                    while ($effectiveDisallowedForConvert -contains $sourceExtension) {
+                        $effectiveDisallowedForConvert.Remove($sourceExtension)
+                    }
+                }
+            }
+            $articleFromResourceRequest.DisallowedForConvert = $effectiveDisallowedForConvert
+            $articleFromResourceRequest.EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
             if ($true -eq $updateFilesOnMatch) {
                 $articleFromResourceRequest.updateOnMatch = $true
                 $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
