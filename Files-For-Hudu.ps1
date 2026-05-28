@@ -100,6 +100,13 @@ param(
 
     $ConvertExtensions = @(Normalize-ExtensionList -Extensions $ConvertExtensions)
     $UploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $UploadAsArticleExtensions)
+    $EmbeddableImageExtensions = @(Normalize-ExtensionList -Extensions $EmbeddableImageExtensions)
+    $ConvertExtensions = @($ConvertExtensions + $EmbeddableImageExtensions | Select-Object -Unique)
+    $UploadAsArticleExtensions = @(
+        $UploadAsArticleExtensions |
+            Where-Object { $EmbeddableImageExtensions -notcontains $_ } |
+            Select-Object -Unique
+    )
 
     # Ensure or prompt for params and directories
     Get-EnsuredPath -Path $DocConversionTempDir
@@ -162,30 +169,16 @@ param(
 
     # region: destination company strategy
     $sameCompanyTarget = $null
-    if ($DestinationStrategy -eq 'SameCompany') {
-        $companies = @(Get-HuduCompanies)
-        if (-not [string]::IsNullOrWhiteSpace($SameCompanyName)) {
-            $sameCompanyTarget = $companies |
-                Where-Object { $_.name -ieq $SameCompanyName -or $_.nickname -ieq $SameCompanyName } |
-                Select-Object -First 1
-            if (-not $sameCompanyTarget) {
-                $sameCompanyTarget = ChoseBest-ByName -Name $SameCompanyName -choices $companies
-            }
-            if (-not $sameCompanyTarget) {
-                Write-Warning "Could not match SameCompanyName '$SameCompanyName' to a Hudu company; choose from the list."
-            }
-        }
+    if ($DestinationStrategy -eq 'SameCompany' -and -not [string]::IsNullOrWhiteSpace($SameCompanyName)) {
+        $sameCompanyTarget = Get-HuduCompanies -name $SameCompanyName; $sameCompanyTarget = $sameCompanyTarget.company ?? $sameCompanyTarget;
         if (-not $sameCompanyTarget) {
-            $sameCompanyTarget = Select-ObjectFromList `
-                -Objects $companies `
-                -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
+            Write-Warning "Could not match SameCompanyName '$SameCompanyName' to a Hudu company; choose from the list."
         }
-
-        if (-not $sameCompanyTarget) {
-            Write-Host "No company selected; treating as Global KB." -ForegroundColor Yellow
-            $DestinationStrategy = 'GlobalKB'
-        }
+        $companies = @($sameCompanyTarget)
+    } else {
+        $companies = Get-HuduCompanies
     }
+
     $results = New-Object System.Collections.Generic.List[object]
     $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
 
@@ -207,7 +200,8 @@ param(
             $effectiveDisallowedForConvert = [System.Collections.ArrayList]@($DisallowedForConvert ?? @())
             $effectiveEmbeddableImageExtensions = @($EmbeddableImageExtensions ?? @())
             if (-not [string]::IsNullOrWhiteSpace($sourceExtension)) {
-                $forceUpload = ($UploadAsArticleExtensions -contains $sourceExtension) -or (
+                $isEmbeddableImage = $EmbeddableImageExtensions -contains $sourceExtension
+                $forceUpload = ((-not $isEmbeddableImage) -and ($UploadAsArticleExtensions -contains $sourceExtension)) -or (
                     $ConvertExtensions.Count -gt 0 -and -not ($ConvertExtensions -contains $sourceExtension)
                 )
                 if ($forceUpload) {
