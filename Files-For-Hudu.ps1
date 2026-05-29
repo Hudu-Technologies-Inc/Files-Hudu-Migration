@@ -57,7 +57,7 @@ param(
     [string]$HuduBaseUrl,
 
     [Parameter(Mandatory = $false)]
-    [string]$HuduApiKey,
+    [securestring]$HuduApiKeySecure,
 
     [Parameter(Mandatory = $false)]
     [string]$SameCompanyName,
@@ -102,6 +102,23 @@ param(
                 $ext
             } |
             Select-Object -Unique
+    }
+
+    function Convert-HuduSecureStringToPlainText {
+        param([securestring]$SecureString)
+
+        if ($null -eq $SecureString) {
+            return $null
+        }
+
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+        try {
+            return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        } finally {
+            if ([IntPtr]::Zero -ne $bstr) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            }
+        }
     }
 
     $requestedConvertExtensions = @(Normalize-ExtensionList -Extensions $requestedConvertExtensions)
@@ -177,7 +194,8 @@ param(
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
     if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
-    if (-not $HuduApiKey) {$HuduApiKey = Read-Host "Enter Hudu API Key"; clear-host;}
+    if (-not $HuduApiKey -and $HuduApiKeySecure) {$HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure}
+    if (-not $HuduApiKey) {$HuduApiKeySecure = Read-Host -Prompt "Enter Hudu API Key" -AsSecureString; $HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure; clear-host;}
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
     if (-not $SourceStrategy) {$SourceStrategy = $(if ($IncludeDirectories.IsPresent) {'TopLevel'} else {Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")})}
     [long]$MaxItemBytes = 100MB
