@@ -1114,6 +1114,21 @@ function New-HuduArticleFromLocalResource {
     $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
     $results.FileHash     = "$($(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash)"
 
+    function Test-ArticleNeedsContentRebuild {
+        param([object]$Article)
+
+        $currentPolicyCreatesArticleContent = (
+            $true -eq $results.isPdf -or
+            $true -eq $results.isImage -or
+            $true -eq $results.isScript -or
+            $true -eq $results.AllowedToConvertFile
+        )
+        if (-not $currentPolicyCreatesArticleContent) { return $false }
+
+        $content = "$($Article.content)"
+        return ($content -match '(?i)Attaching Upload|See Attached Document')
+    }
+
     $exactMatch = $exactMatch ?? $($companyDocs | Where-Object {$_.name -ieq $results.originalName -or $_.name -ieq $results.OriginalDoc.Name} | Select-Object -First 1)
     $exactMatch = $exactMatch ?? $(if ($true -eq $results.IsGlobalKB) {get-huduarticles -name $results.originalName | where-object {$null -eq $_.company_id}} else {$companyDocs | Where-Object { $_.name -ieq $results.originalName } | Select-Object -First 1})
 
@@ -1159,9 +1174,17 @@ function New-HuduArticleFromLocalResource {
                     -SourceMTimeUtc $results.SourceLastModified `
                     -DestUpload $destUpload
             }
+            $matchedArticleNeedsContentRebuild = Test-ArticleNeedsContentRebuild -Article $results.MatchedDoc
+            if (-not $shouldUpdate -and $matchedArticleNeedsContentRebuild) {
+                $shouldUpdate = $true
+            }
 
             $results.Action = if ($shouldUpdate) {
-                "Matched existing article '$($results.MatchedDoc.name)' but source is newer or no dest upload exists; proceeding with update."
+                if ($matchedArticleNeedsContentRebuild) {
+                    "Matched existing article '$($results.MatchedDoc.name)' but it is attachment-only and current policy creates article content; proceeding with update."
+                } else {
+                    "Matched existing article '$($results.MatchedDoc.name)' but source is newer or no dest upload exists; proceeding with update."
+                }
             } else {
                 "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update."
             }
@@ -1200,9 +1223,17 @@ function New-HuduArticleFromLocalResource {
                     -SourceSha256 $results.FileHash `
                     -DestUpload $destUpload
             }
+            $matchedArticleNeedsContentRebuild = Test-ArticleNeedsContentRebuild -Article $results.MatchedDoc
+            if (-not $shouldUpdate -and $matchedArticleNeedsContentRebuild) {
+                $shouldUpdate = $true
+            }
 
             $results.Action = if ($shouldUpdate) {
-                "Matched existing article '$($results.MatchedDoc.name)' but file hash differs or no dest upload exists; proceeding with update."
+                if ($matchedArticleNeedsContentRebuild) {
+                    "Matched existing article '$($results.MatchedDoc.name)' but it is attachment-only and current policy creates article content; proceeding with update."
+                } else {
+                    "Matched existing article '$($results.MatchedDoc.name)' but file hash differs or no dest upload exists; proceeding with update."
+                }
             } else {
                 "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update."
             }
