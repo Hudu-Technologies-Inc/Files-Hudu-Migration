@@ -1228,12 +1228,12 @@ function New-HuduArticleFromLocalResource {
     } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Info -Message $results.Strategy
         $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
-      }  elseif ($true -eq $results.isPdf) {
+    }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
         $results.NewDoc = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters
         $results.NewDoc = $results.NewDoc.HuduArticle;
-      } elseif ($true -eq $results.AllowedToConvertFile) {
+    } elseif ($true -eq $results.AllowedToConvertFile) {
     # conversion process - non-pdf [but convertable]
         $results.Strategy = "Processing as singular file to convert to and attach as Article."; Write-Info -Message $results.Strategy
             $results.outputDir = Join-Path $DocConversionTempDir ([guid]::NewGuid().ToString())

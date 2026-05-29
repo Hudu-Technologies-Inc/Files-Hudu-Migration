@@ -13,7 +13,7 @@ It uses the **community-supported [Articles-From-Anything](./Client-Libraries/Ar
 | Component | Required Version |
 |----------|------------------|
 | PowerShell | 7.5.1+ |
-| Hudu | 2.39.6+ |
+| Hudu | 2.40.2+ |
 | Windows | Any |
 | Hudu API Key | — |
 | LibreOffice | Latest MSI* |
@@ -35,15 +35,35 @@ This project serves as a **safe foundation** for:
 
 | Parameter | Description |
 |----------|-------------|
-| **TargetDocumentDir** *(required)* | Directory containing the articles to process. |
-| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. |
+| **TargetDocumentDir** *(required)* | File or directory containing the articles to process. |
+| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. Defaults to `Docs-Temp` under the project directory. |
 | **filter** | Case-insensitive file or directory filter. Supports wildcards (e.g., `*.pdf`, `keep*`). |
-| **DestinationStrategy** | Determines how articles are added to Hudu: `GlobalKb`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
-| **SourceStrategy** | Controls recursion: use `Recurse` to search subdirectories; omit to stay at a single level (will prompt if missing). |
+| **updateFilesOnMatch** | When `true`, matched existing articles can be updated according to `UpdateStrategy`. When `false`, matched articles are skipped. Default: **true**. |
+| **UpdateStrategy** | Match-update comparison mode: `filehash`, `date`, or `none`. Default: **filehash**. If `updateFilesOnMatch` is `false`, this is forced to `none` for processing. |
+| **DestinationStrategy** | Determines where articles are added: `GlobalKB`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
+| **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
+| **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
 | **MaxDepth** | Maximum recursion depth when using `Recurse`. Default: **5** levels. |
+| **PersistTempfiles** | Keep conversion temp files after the run instead of deleting `DocConversionTempDir`. Default: **false**. |
+| **HuduBaseUrl** | Hudu base URL. If omitted, the script prompts. Useful for frontend or unattended invocation. |
+| **HuduApiKey** | Hudu API key. If omitted, the script prompts. Useful for frontend or unattended invocation. |
+| **SameCompanyName** | Company name to use when `DestinationStrategy` is `SameCompany`. If omitted or not matched, no company is assigned and the article path behaves as Global KB. |
+| **ConvertExtensions** | Optional explicit conversion allow-list, e.g. `@(".docx",".xlsx",".csv")`. If non-empty, matching extensions are removed from the effective deny-list before processing and files outside this list are uploaded as attachment-only articles. If empty, falls back to `files-config.ps1`; if config is also empty, `DisallowedForConvert` controls conversion eligibility. |
+| **UploadAsArticleExtensions** | Optional explicit force-upload list, e.g. `@(".xlsx",".csv")`. Matching non-image files are added to the effective deny-list before processing and uploaded as attachment-only articles instead of converted. If empty, falls back to `files-config.ps1`; if config is also empty, no additional extensions are forced to upload-only. |
+
+### Parameter and Config Precedence
+
+For `ConvertExtensions` and `UploadAsArticleExtensions`, non-empty script parameters are explicit instructions and win over `files-config.ps1`. If the parameter is empty or omitted, the matching value from `files-config.ps1` is used. If both are empty, the script uses its normal defaults.
+
+Before each call to `New-HuduArticleFromLocalResource`, the main script resolves these preferences into effective `DisallowedForConvert` and `EmbeddableImageExtensions` values for that file. Explicit `UploadAsArticleExtensions` has highest priority. Explicit `ConvertExtensions` is next and can allow an extension even when config-level upload or deny preferences would otherwise block it. Config-level `UploadAsArticleExtensions`, config-level `ConvertExtensions`, and then `DisallowedForConvert` apply after that.
+
+File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Images listed in `EmbeddableImageExtensions` are embedded in articles. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
+
+Extension lists are normalized before use: values are lowercased, leading dots are added when missing, blank values are ignored, and duplicates are removed.
+
 
 ---
 
@@ -143,6 +163,10 @@ To configure any files that you wish to skip conversion for, upload as standalon
 If there is a specific format that you don't like to convert, like xlsx or xlsm, for example, you can add it to this array.
 
 `SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu. There are some sane defaults in-place if you aren't sure.
+
+`ConvertExtensions` is optional. When populated, it becomes a conversion allow-list: only matching extensions, plus embeddable images, are converted or embedded. Everything else is uploaded as an attachment-only article. Leave it empty to use `DisallowedForConvert` as the broader conversion gate.
+
+`UploadAsArticleExtensions` is optional. When populated, matching non-image extensions are forced to upload-only article behavior even if LibreOffice could convert them.
 
 ## Community & Socials
 

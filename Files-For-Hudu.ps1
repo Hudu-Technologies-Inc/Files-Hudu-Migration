@@ -70,6 +70,10 @@ param(
 )
     $WorkDir = $PSScriptRoot
     $VerbosePreference = 'SilentlyContinue'
+    $requestedConvertExtensions = @($ConvertExtensions)
+    $requestedUploadAsArticleExtensions = @($UploadAsArticleExtensions)
+    $ConvertExtensions = $null
+    $UploadAsArticleExtensions = $null
     
 
     # Load helper scripts
@@ -85,6 +89,8 @@ param(
         $DisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
         $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
     }
+    $configConvertExtensions = @($ConvertExtensions)
+    $configUploadAsArticleExtensions = @($UploadAsArticleExtensions)
 
     function Normalize-ExtensionList {
         param([string[]]$Extensions)
@@ -98,15 +104,72 @@ param(
             Select-Object -Unique
     }
 
-    $ConvertExtensions = @(Normalize-ExtensionList -Extensions $ConvertExtensions)
-    $UploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $UploadAsArticleExtensions)
+    $requestedConvertExtensions = @(Normalize-ExtensionList -Extensions $requestedConvertExtensions)
+    $requestedUploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $requestedUploadAsArticleExtensions)
+    $configConvertExtensions = @(Normalize-ExtensionList -Extensions $configConvertExtensions)
+    $configUploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $configUploadAsArticleExtensions)
+    $explicitConvertExtensions = @($requestedConvertExtensions)
+    $explicitUploadAsArticleExtensions = @($requestedUploadAsArticleExtensions)
+    $ConvertExtensions = @(if ($requestedConvertExtensions.Count -gt 0) { $requestedConvertExtensions } else { $configConvertExtensions })
+    $UploadAsArticleExtensions = @(if ($requestedUploadAsArticleExtensions.Count -gt 0) { $requestedUploadAsArticleExtensions } else { $configUploadAsArticleExtensions })
     $EmbeddableImageExtensions = @(Normalize-ExtensionList -Extensions $EmbeddableImageExtensions)
+    $hasConvertExtensionFilter = $ConvertExtensions.Count -gt 0
     $ConvertExtensions = @($ConvertExtensions + $EmbeddableImageExtensions | Select-Object -Unique)
     $UploadAsArticleExtensions = @(
         $UploadAsArticleExtensions |
             Where-Object { $EmbeddableImageExtensions -notcontains $_ } |
             Select-Object -Unique
     )
+
+    function Resolve-ResourceConversionPreferences {
+        param(
+            [Parameter(Mandatory)][string]$Extension,
+            [System.Collections.ArrayList]$BaseDisallowedForConvert,
+            [string[]]$BaseEmbeddableImageExtensions
+        )
+
+        $effectiveDisallowedForConvert = [System.Collections.ArrayList]@($BaseDisallowedForConvert ?? @())
+        $effectiveEmbeddableImageExtensions = @($BaseEmbeddableImageExtensions ?? @())
+        if ([string]::IsNullOrWhiteSpace($Extension)) {
+            return @{
+                DisallowedForConvert = $effectiveDisallowedForConvert
+                EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
+                ForceUpload = $false
+                ExplicitConvert = $false
+            }
+        }
+
+        $sourceExtension = $Extension.ToLowerInvariant()
+        $isEmbeddableImage = $effectiveEmbeddableImageExtensions -contains $sourceExtension
+        $isExplicitUpload = (-not $isEmbeddableImage) -and ($explicitUploadAsArticleExtensions -contains $sourceExtension)
+        $isExplicitConvert = $explicitConvertExtensions -contains $sourceExtension
+        $isConfiguredUpload = (-not $isEmbeddableImage) -and ($UploadAsArticleExtensions -contains $sourceExtension)
+        $isExcludedByConvertAllowList = $hasConvertExtensionFilter -and -not ($ConvertExtensions -contains $sourceExtension)
+
+        $forceUpload = $isExplicitUpload -or (
+            -not $isExplicitConvert -and ($isConfiguredUpload -or $isExcludedByConvertAllowList)
+        )
+
+        if ($forceUpload) {
+            if (-not ($effectiveDisallowedForConvert -contains $sourceExtension)) {
+                [void]$effectiveDisallowedForConvert.Add($sourceExtension)
+            }
+            $effectiveEmbeddableImageExtensions = @(
+                $effectiveEmbeddableImageExtensions | Where-Object { "$_".ToLowerInvariant() -ne $sourceExtension }
+            )
+        } elseif ($hasConvertExtensionFilter) {
+            while ($effectiveDisallowedForConvert -contains $sourceExtension) {
+                $effectiveDisallowedForConvert.Remove($sourceExtension)
+            }
+        }
+
+        return @{
+            DisallowedForConvert = $effectiveDisallowedForConvert
+            EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
+            ForceUpload = $forceUpload
+            ExplicitConvert = $isExplicitConvert
+        }
+    }
 
     # Ensure or prompt for params and directories
     Get-EnsuredPath -Path $DocConversionTempDir
@@ -197,28 +260,12 @@ param(
             if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
             $sourceExtension = if ($sourceObject.PSIsContainer) { "" } else { [IO.Path]::GetExtension($sourceObject.Name).ToLowerInvariant() }
-            $effectiveDisallowedForConvert = [System.Collections.ArrayList]@($DisallowedForConvert ?? @())
-            $effectiveEmbeddableImageExtensions = @($EmbeddableImageExtensions ?? @())
-            if (-not [string]::IsNullOrWhiteSpace($sourceExtension)) {
-                $isEmbeddableImage = $EmbeddableImageExtensions -contains $sourceExtension
-                $forceUpload = ((-not $isEmbeddableImage) -and ($UploadAsArticleExtensions -contains $sourceExtension)) -or (
-                    $ConvertExtensions.Count -gt 0 -and -not ($ConvertExtensions -contains $sourceExtension)
-                )
-                if ($forceUpload) {
-                    if (-not ($effectiveDisallowedForConvert -contains $sourceExtension)) {
-                        [void]$effectiveDisallowedForConvert.Add($sourceExtension)
-                    }
-                    $effectiveEmbeddableImageExtensions = @(
-                        $effectiveEmbeddableImageExtensions | Where-Object { "$_".ToLowerInvariant() -ne $sourceExtension }
-                    )
-                } elseif ($ConvertExtensions.Count -gt 0) {
-                    while ($effectiveDisallowedForConvert -contains $sourceExtension) {
-                        $effectiveDisallowedForConvert.Remove($sourceExtension)
-                    }
-                }
-            }
-            $articleFromResourceRequest.DisallowedForConvert = $effectiveDisallowedForConvert
-            $articleFromResourceRequest.EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
+            $resourcePreferences = Resolve-ResourceConversionPreferences `
+                -Extension $sourceExtension `
+                -BaseDisallowedForConvert $DisallowedForConvert `
+                -BaseEmbeddableImageExtensions $EmbeddableImageExtensions
+            $articleFromResourceRequest.DisallowedForConvert = $resourcePreferences.DisallowedForConvert
+            $articleFromResourceRequest.EmbeddableImageExtensions = $resourcePreferences.EmbeddableImageExtensions
             if ($true -eq $updateFilesOnMatch) {
                 $articleFromResourceRequest.updateOnMatch = $true
                 $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
