@@ -60,6 +60,12 @@ param(
     [securestring]$HuduApiKeySecure,
 
     [Parameter(Mandatory = $false)]
+    [string]$HuduApiKeyPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HuduApiKey,
+
+    [Parameter(Mandatory = $false)]
     [string]$SameCompanyName,
 
     [Parameter(Mandatory = $false)]
@@ -118,6 +124,20 @@ param(
             if ([IntPtr]::Zero -ne $bstr) {
                 [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
             }
+        }
+    }
+
+    function Read-HuduApiKeyFromTransientFile {
+        param([Parameter(Mandatory = $true)][string]$Path)
+
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+            throw "The transient Hudu API key file was not found."
+        }
+
+        try {
+            return ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8)).Trim()
+        } finally {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -194,6 +214,7 @@ param(
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
     if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
+    if (-not $HuduApiKey -and $HuduApiKeyPath) {$HuduApiKey = Read-HuduApiKeyFromTransientFile -Path $HuduApiKeyPath}
     if (-not $HuduApiKey -and $HuduApiKeySecure) {$HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure}
     if (-not $HuduApiKey) {$HuduApiKeySecure = Read-Host -Prompt "Enter Hudu API Key" -AsSecureString; $HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure; clear-host;}
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
