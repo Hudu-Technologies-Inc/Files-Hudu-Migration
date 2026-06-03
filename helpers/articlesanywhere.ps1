@@ -764,7 +764,7 @@ function Set-HuduArticleFromPDF {
     [bool]$includeOriginal=$true, # include original pdf attached to converted article
     [bool]$CalculateHashes = $true,
     [int]$MaxHtmlCharacters = 0,
-    [bool]$PlainTextConversion = $false
+    [bool]$PlainTextConversion = $true
   )
 
     $null = Get-EnsuredPath -Path $DocConversionTempDir
@@ -1232,7 +1232,7 @@ function New-HuduArticleFromLocalResource {
     [bool]$updateOnMatch=$true,
     [ValidateSet('date','filehash','none')][string]$UpdateStrategy='filehash',
     [bool]$includeOriginals=$true,
-    [bool]$PlainTextPdfConversion=$false,
+    [bool]$PlainTextPdfConversion=$true,
     [int]$MaxHtmlCharacters=192000,
     [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),

@@ -204,7 +204,7 @@ param(
             $articleFromResourceRequest = @{
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
                 IncludeOriginals = ($IncludeOriginals ?? $true)
-                PlainTextPdfConversion = ($PlainTextPdfConversion ?? $false)
+                PlainTextPdfConversion = ($PlainTextPdfConversion ?? $true)
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null
@@ -252,6 +252,12 @@ param(
                 }
             }
             # $VerbosePreference = 'Continue'
+            $newArticleCommand = Get-Command -Name New-HuduArticleFromLocalResource -ErrorAction Stop
+            foreach ($paramName in @($articleFromResourceRequest.Keys)) {
+                if (-not $newArticleCommand.Parameters.ContainsKey($paramName)) {
+                    $articleFromResourceRequest.Remove($paramName)
+                }
+            }
             write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
             $results.Add($result)
