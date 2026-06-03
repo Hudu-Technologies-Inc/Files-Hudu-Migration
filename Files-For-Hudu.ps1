@@ -40,7 +40,7 @@ param(
     [bool]$IncludeOriginals = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$PlainTextPdfConversion = $false,
+    [bool]$PlainTextPdfConversion = $true,
 
     # Max number of items to process in one run (files + dirs, filtered)
     [Parameter(Mandatory = $false)]
