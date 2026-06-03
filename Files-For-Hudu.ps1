@@ -118,7 +118,7 @@ param(
     }
 
     # Ensure or prompt for params and directories
-    Get-EnsuredPath -Path $DocConversionTempDir
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
     if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
@@ -137,35 +137,35 @@ param(
     }    
     
     if ($SourceStrategy -eq 'TopLevel') {
-        $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse:$false
+        $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse:$false)
     } else {
         try {
-            $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse -Depth $MaxDepth -ErrorAction Stop
+            $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse -Depth $MaxDepth -ErrorAction Stop)
         } catch {
             Write-Warning "Get-ChildItem -Depth is not supported in this PowerShell version; falling back to full recursion."
-            $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse -ErrorAction Stop
+            $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse -ErrorAction Stop)
         }
     }
     # filter requested documents
     $SkipEntirely = $SkipEntirely ?? [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
-    $sourceObjects = $sourceObjects | Where-Object {
+    $sourceObjects = @($sourceObjects | Where-Object {
         if ($SkipEntirely -contains $_.Extension.ToLower()) {return $false}
         return $true
-    }
+    })
 
     if ($IncludeDirectories.IsPresent) {
-        $sourceObjects = $sourceObjects |
-            Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) }
+        $sourceObjects = @($sourceObjects |
+            Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) })
     } else {
-        $sourceObjects = $sourceObjects |
-            Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
+        $sourceObjects = @($sourceObjects |
+            Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes })
     }
     if (-not [string]::IsNullOrEmpty($filter)) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
-        $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
+        $sourceObjects = @($sourceObjects | Where-Object { $_.Name -ilike "$filter" })
     }
 
-    if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
+    if (-not $sourceObjects -or $sourceObjects.Count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
         Write-Warning "Not enough viable source objects in your target directory after filtering; aborting."
         return
     }    
@@ -181,7 +181,7 @@ param(
     # region: destination company strategy
     $sameCompanyTarget = $null
     if ($DestinationStrategy -eq 'SameCompany' -and -not [string]::IsNullOrWhiteSpace($SameCompanyName)) {
-        $sameCompanyTarget = Get-HuduCompanies -name $SameCompanyName; $sameCompanyTarget = $sameCompanyTarget.company ?? $sameCompanyTarget;
+        $sameCompanyTarget = ChoseBest-ByName -Name $SameCompanyName -choices @(Get-HuduCompanies -name $SameCompanyName)
         if (-not $sameCompanyTarget) {
             Write-Warning "Could not match SameCompanyName '$SameCompanyName' to a Hudu company; choose from the list."
         }
@@ -230,14 +230,16 @@ param(
                         -Objects (Get-HuduCompanies) -allownull $true `
                         -Message "Which company to attribute `"$($articleFromResourceRequest.ResourceLocation)`" to? (Cancel for Global KB)"
 
-                    if ($target -and $target.name) {
-                        $articleFromResourceRequest.companyName = $target.name
+                    $targetName = Get-HuduObjectName -InputObject (Unwrap-HuduResultObject -InputObject $target -WrapperNames @('company'))
+                    if ($target -and $targetName) {
+                        $articleFromResourceRequest.companyName = $targetName
                     }
                 }
 
                 'SameCompany' {
-                    if ($sameCompanyTarget -and $sameCompanyTarget.name) {
-                        $articleFromResourceRequest.companyName = $sameCompanyTarget.name
+                    $sameCompanyTargetName = Get-HuduObjectName -InputObject $sameCompanyTarget
+                    if ($sameCompanyTarget -and $sameCompanyTargetName) {
+                        $articleFromResourceRequest.companyName = $sameCompanyTargetName
                     }
                 }
 
