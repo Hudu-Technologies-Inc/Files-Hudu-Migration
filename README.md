@@ -49,7 +49,6 @@ This project serves as a **safe foundation** for:
 | **MaxDepth** | Maximum recursion depth when using `Recurse`. Default: **5** levels. |
 | **PersistTempfiles** | Keep conversion temp files after the run instead of deleting `DocConversionTempDir`. Default: **false**. |
 | **HuduBaseUrl** | Hudu base URL. If omitted, the script prompts. Useful for frontend or unattended invocation. |
-| **HuduApiKeySecure** | Hudu API key securestring |
 | **SameCompanyName** | Company name to use when `DestinationStrategy` is `SameCompany`. If omitted or not matched, no company is assigned and the article path behaves as Global KB. |
 | **ConvertExtensions** | Optional explicit conversion allow-list, e.g. `@(".docx",".xlsx",".csv")`. If non-empty, matching extensions are removed from the effective deny-list before processing and files outside this list are uploaded as attachment-only articles. If empty, falls back to `files-config.ps1`; if config is also empty, `DisallowedForConvert` controls conversion eligibility. |
 | **UploadAsArticleExtensions** | Optional explicit force-upload list, e.g. `@(".xlsx",".csv")`. Matching non-image files are added to the effective deny-list before processing and uploaded as attachment-only articles instead of converted. If empty, falls back to `files-config.ps1`; if config is also empty, no additional extensions are forced to upload-only. |
