@@ -39,6 +39,9 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
 
+    [Parameter(Mandatory = $false)]
+    [bool]$PlainTextPdfConversion = $false,
+
     # Max number of items to process in one run (files + dirs, filtered)
     [Parameter(Mandatory = $false)]
     [int]$MaxItems = 500,
@@ -201,6 +204,7 @@ param(
             $articleFromResourceRequest = @{
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
                 IncludeOriginals = ($IncludeOriginals ?? $true)
+                PlainTextPdfConversion = ($PlainTextPdfConversion ?? $false)
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null

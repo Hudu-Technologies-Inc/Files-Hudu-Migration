@@ -147,7 +147,7 @@ function Set-HuduArticleFromHtml {
   )
     $null = Get-EnsuredPath -Path $DocConversionTempDir
 
-    if (-not $script:CurrentHuduVersion) {
+    if (-not (Get-Variable -Name CurrentHuduVersion -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:CurrentHuduVersion) {
         $appInfo = Get-HuduAppInfo
         $script:CurrentHuduVersion = [version]$appInfo.version
     }
@@ -613,7 +613,12 @@ function Get-HTMLAndImagesArrayFromPDF {
 
   # Ensure pdftohtml exists; if not, fetch Poppler and point to Library\bin\pdftohtml.exe
   if (-not $PdfToHtmlPath -or -not (Test-Path -LiteralPath $PdfToHtmlPath)) {
-    if (-not $Script:PDFToHTMLTempBinLocation -or -not (Test-Path -LiteralPath $Script:PDFToHTMLTempBinLocation)) {
+    $cachedPdfToHtmlPath = if (Get-Variable -Name PDFToHTMLTempBinLocation -Scope Script -ErrorAction SilentlyContinue) {
+      $Script:PDFToHTMLTempBinLocation
+    } else {
+      $null
+    }
+    if (-not $cachedPdfToHtmlPath -or -not (Test-Path -LiteralPath $cachedPdfToHtmlPath)) {
 
     $url  = 'https://github.com/oschwartz10612/poppler-windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip'
     $root = Join-Path $env:TEMP ("poppler-" + [guid]::NewGuid())
@@ -627,15 +632,15 @@ function Get-HTMLAndImagesArrayFromPDF {
     if (-not $bin) { throw "Could not find Library\bin in downloaded Poppler zip." }
     $PdfToHtmlPath = Join-Path $bin 'pdftohtml.exe'
     } else {
-      Write-Host "Reusing Script-Temp PDFtoHTML location $($Script:PDFToHTMLTempBinLocation)"
-      $PdfToHtmlPath = $Script:PDFToHTMLTempBinLocation
+      Write-Host "Reusing Script-Temp PDFtoHTML location $cachedPdfToHtmlPath"
+      $PdfToHtmlPath = $cachedPdfToHtmlPath
     }
   }
 
   if (-not (Test-Path -LiteralPath $PdfToHtmlPath)) {
     throw "pdftohtml not found at: $PdfToHtmlPath"
   } else {
-    $Script:PDFToHTMLTempBinLocation = $PdfToHtmlPath ?? $Script:PDFToHTMLTempBinLocation 
+    $Script:PDFToHTMLTempBinLocation = $PdfToHtmlPath
   }
 
     $base       = [IO.Path]::GetFileNameWithoutExtension($InputPdfPath)
@@ -677,6 +682,79 @@ function Get-HTMLAndImagesArrayFromPDF {
   }
 }
 
+function Get-HTMLFromPDFPlainText {
+  param(
+    [Parameter(Mandatory)][string]$InputPdfPath,
+    [string]$PdfToTextPath
+  )
+
+  if (-not (Test-Path -LiteralPath $InputPdfPath -PathType Leaf)) {
+    throw "PDF not found: $InputPdfPath"
+  }
+
+  $OutputDir = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+  [IO.Directory]::CreateDirectory($OutputDir) | Out-Null
+
+  if (-not $PdfToTextPath -or -not (Test-Path -LiteralPath $PdfToTextPath)) {
+    $cachedPdfToTextPath = if (Get-Variable -Name PDFToTextTempBinLocation -Scope Script -ErrorAction SilentlyContinue) {
+      $Script:PDFToTextTempBinLocation
+    } else {
+      $null
+    }
+    if (-not $cachedPdfToTextPath -or -not (Test-Path -LiteralPath $cachedPdfToTextPath)) {
+      $url  = 'https://github.com/oschwartz10612/poppler-windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip'
+      $root = Join-Path $env:TEMP ("poppler-" + [guid]::NewGuid())
+      $zip  = Join-Path $root 'poppler.zip'
+      [IO.Directory]::CreateDirectory($root) | Out-Null
+      Invoke-WebRequest -Uri $url -OutFile $zip
+      Expand-Archive -Path $zip -DestinationPath $root -Force
+      $bin = Get-ChildItem -Recurse -Directory $root -Filter bin |
+             Where-Object { $_.FullName -match '\\Library\\bin$' } |
+             Select-Object -First 1 -ExpandProperty FullName
+      if (-not $bin) { throw "Could not find Library\bin in downloaded Poppler zip." }
+      $PdfToTextPath = Join-Path $bin 'pdftotext.exe'
+    } else {
+      Write-Host "Reusing Script-Temp PDFtoText location $cachedPdfToTextPath"
+      $PdfToTextPath = $cachedPdfToTextPath
+    }
+  }
+
+  if (-not (Test-Path -LiteralPath $PdfToTextPath)) {
+    throw "pdftotext not found at: $PdfToTextPath"
+  } else {
+    $Script:PDFToTextTempBinLocation = $PdfToTextPath
+  }
+
+  $base = [IO.Path]::GetFileNameWithoutExtension($InputPdfPath)
+  $textOutput = Join-Path $OutputDir ($base + '.txt')
+  $argumentsArray = @(
+    '-layout',
+    '-enc', 'UTF-8',
+    $InputPdfPath,
+    $textOutput
+  )
+
+  Write-Host "Using pdftotext: $PdfToTextPath"
+  Write-Host "Args: $($argumentsArray -join ' ')"
+  & $PdfToTextPath @argumentsArray 2>&1 | Write-Host
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $textOutput)) {
+    throw "pdftotext failed (exit $LASTEXITCODE) or output missing: $textOutput"
+  }
+
+  $plainText = Get-Content -LiteralPath $textOutput -Raw -Encoding UTF8
+  $encodedText = [System.Net.WebUtility]::HtmlEncode($plainText)
+  $encodedName = [System.Net.WebUtility]::HtmlEncode([IO.Path]::GetFileName($InputPdfPath))
+  $html = "<h2>$encodedName</h2><pre><code>$encodedText</code></pre>$(Get-MetadataArticleBlock -filePath $InputPdfPath)"
+
+  [pscustomobject]@{
+    HtmlPath  = $textOutput
+    Html      = $html
+    Images    = @()
+    OutputDir = $OutputDir
+    ToolPath  = $PdfToTextPath
+  }
+}
+
 function Set-HuduArticleFromPDF {
   [CmdletBinding()]
   param(
@@ -685,12 +763,13 @@ function Set-HuduArticleFromPDF {
     [string]$Title,
     [bool]$includeOriginal=$true, # include original pdf attached to converted article
     [bool]$CalculateHashes = $true,
-    [int]$MaxHtmlCharacters = 0
+    [int]$MaxHtmlCharacters = 0,
+    [bool]$PlainTextConversion = $false
   )
 
     $null = Get-EnsuredPath -Path $DocConversionTempDir
 
-    if (-not $script:CurrentHuduVersion) {
+    if (-not (Get-Variable -Name CurrentHuduVersion -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:CurrentHuduVersion) {
         $appInfo = Get-HuduAppInfo
         $script:CurrentHuduVersion = [version]$appInfo.version
     }
@@ -702,7 +781,11 @@ function Set-HuduArticleFromPDF {
 
   $pdfBaseName = [IO.Path]::GetFileNameWithoutExtension($PdfPath)
 
-  $pdfData = Get-HTMLAndImagesArrayFromPDF -InputPdfPath $PdfPath
+  $pdfData = if ($PlainTextConversion) {
+    Get-HTMLFromPDFPlainText -InputPdfPath $PdfPath
+  } else {
+    Get-HTMLAndImagesArrayFromPDF -InputPdfPath $PdfPath
+  }
 
   $displayTitle = if ($Title) { $Title } else { $pdfBaseName }
 
@@ -1149,6 +1232,7 @@ function New-HuduArticleFromLocalResource {
     [bool]$updateOnMatch=$true,
     [ValidateSet('date','filehash','none')][string]$UpdateStrategy='filehash',
     [bool]$includeOriginals=$true,
+    [bool]$PlainTextPdfConversion=$false,
     [int]$MaxHtmlCharacters=192000,
     [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
@@ -1158,7 +1242,7 @@ function New-HuduArticleFromLocalResource {
 
     $null = Get-EnsuredPath -Path $DocConversionTempDir
 
-    if (-not $script:CurrentHuduVersion) {
+    if (-not (Get-Variable -Name CurrentHuduVersion -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:CurrentHuduVersion) {
         $appInfo = Get-HuduAppInfo
         $script:CurrentHuduVersion = [version]$appInfo.version
     }
@@ -1168,7 +1252,7 @@ function New-HuduArticleFromLocalResource {
     }
     $MatchedDocs = $null; $exactMatch = $null;
     $results = [pscustomobject]@{
-        RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy; MaxHtmlCharacters = $MaxHtmlCharacters;}
+        RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy; MaxHtmlCharacters = $MaxHtmlCharacters; PlainTextPdfConversion = $PlainTextPdfConversion;}
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; HtmlCharacterCount = $null; isScript =$null;
         attachmentStatus = "No attachment info yet."; AttachmentHashInfo = $null; LocalAttachmentNewer = $null; RemoteAttachmentUTCdate = $null; ContentHashInfo = $null; ContentHash = $null; RemoteContentHash = $null; LocalContentNewer = $null; RemoteArticleUTCdate = $null;
         NewDoc = $null; OriginalDoc = $null; Upload = $null; CalculateEmbedHashes = ([bool]($script:CurrentHuduVersion -ge [version]("2.41.0")))
@@ -1421,7 +1505,7 @@ function New-HuduArticleFromLocalResource {
     }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
-        $results.NewDoc = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters
+        $results.NewDoc = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters -PlainTextConversion $PlainTextPdfConversion
         $results.NewDoc = Unwrap-HuduResultObject -InputObject $results.NewDoc -WrapperNames @('HuduArticle', 'article')
     } elseif ($true -eq $results.AllowedToConvertFile) {
     # conversion process - non-pdf [but convertable]
