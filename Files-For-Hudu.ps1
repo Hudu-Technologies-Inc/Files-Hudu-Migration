@@ -39,6 +39,9 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$IncludeOriginals = $true,
 
+    [Parameter(Mandatory = $false)]
+    [bool]$PlainTextPdfConversion = $true,
+
     # Max number of items to process in one run (files + dirs, filtered)
     [Parameter(Mandatory = $false)]
     [int]$MaxItems = 500,
@@ -52,34 +55,80 @@ param(
     [int]$MaxDepth = 5,
 
     [Parameter(Mandatory = $false)]
-    [bool]$PersistTempfiles = $false
+    [bool]$PersistTempfiles = $false,
+    [Parameter(Mandatory = $false)]
+    [string]$HuduBaseUrl,
+
+    [Parameter(Mandatory = $false)]
+    [securestring]$HuduApiKeySecure,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HuduApiKeyPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$HuduApiKey,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SameCompanyName,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$ConvertExtensions = @(),
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$UploadAsArticleExtensions = @()
 )
     $WorkDir = $PSScriptRoot
     $VerbosePreference = 'SilentlyContinue'
-    
+    $requestedConvertExtensions = @($ConvertExtensions)
+    $requestedUploadAsArticleExtensions = @($UploadAsArticleExtensions)
+    $ConvertExtensions = $null
+    $UploadAsArticleExtensions = $null
+
+    $defaultEmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
+    $defaultDisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
+    $defaultSkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
+
+    # Load config before helper scripts because helpers/init.ps1 normalizes these values at import time.
+    try {
+        . (Join-Path $WorkDir "files-config.ps1")
+    } catch {
+        Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
+    }
+
+    if (-not (Get-Variable -Name EmbeddableImageExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $EmbeddableImageExtensions) {
+        $EmbeddableImageExtensions = $defaultEmbeddableImageExtensions
+    }
+    if (-not (Get-Variable -Name DisallowedForConvert -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $DisallowedForConvert) {
+        $DisallowedForConvert = $defaultDisallowedForConvert
+    }
+    if (-not (Get-Variable -Name SkipEntirely -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $SkipEntirely) {
+        $SkipEntirely = $defaultSkipEntirely
+    }
+    if (-not (Get-Variable -Name ConvertExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $ConvertExtensions) {
+        $ConvertExtensions = @()
+    }
+    if (-not (Get-Variable -Name UploadAsArticleExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $UploadAsArticleExtensions) {
+        $UploadAsArticleExtensions = @()
+    }
+
+    $configConvertExtensions = @($ConvertExtensions)
+    $configUploadAsArticleExtensions = @($UploadAsArticleExtensions)
 
     # Load helper scripts
     foreach ($file in (Get-ChildItem -Path (Join-Path $WorkDir "helpers") -Filter "*.ps1" -File | Sort-Object Name)) {
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
         . $file.FullName
     }
-    try {
-        . .\files-config.ps1
-    } catch {
-        Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
-        $EmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
-        $DisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
-        $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
-    }
 
     # Ensure or prompt for params and directories
-    [version]$script:CurrentHuduVersion = [version]("$($(get-huduappinfo).version)")
-    Get-EnsuredPath -Path $DocConversionTempDir
+    $null = Get-EnsuredPath -Path $DocConversionTempDir
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
     if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
-    if (-not $HuduApiKey) {$HuduApiKey = Read-Host "Enter Hudu API Key"; clear-host;}
+    if (-not $HuduApiKey -and $HuduApiKeyPath) {$HuduApiKey = Read-HuduApiKeyFromTransientFile -Path $HuduApiKeyPath}
+    if (-not $HuduApiKey -and $HuduApiKeySecure) {$HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure}
+    if (-not $HuduApiKey) {$HuduApiKeySecure = Read-Host -Prompt "Enter Hudu API Key" -AsSecureString; $HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure; clear-host;}
     if (-not $DestinationStrategy) {$DestinationStrategy = Select-ObjectFromList -Message "Will each file be for a unique company?" -Objects @("VariousCompanies","SameCompany","GlobalKB")}
     if (-not $SourceStrategy) {$SourceStrategy = $(if ($IncludeDirectories.IsPresent) {'TopLevel'} else {Select-ObjectFromList -Message "Do you want to look for source documents in $TargetDocumentDir recursively?" -Objects @("Recurse","TopLevel")})}
     [long]$MaxItemBytes = 100MB
@@ -91,59 +140,63 @@ param(
     }    
     
     if ($SourceStrategy -eq 'TopLevel') {
-        $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse:$false
+        $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse:$false)
     } else {
         try {
-            $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse -Depth $MaxDepth -ErrorAction Stop
+            $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse -Depth $MaxDepth -ErrorAction Stop)
         } catch {
             Write-Warning "Get-ChildItem -Depth is not supported in this PowerShell version; falling back to full recursion."
-            $sourceObjects = Get-ChildItem -Path $TargetDocumentDir -Recurse -ErrorAction Stop
+            $sourceObjects = @(Get-ChildItem -Path $TargetDocumentDir -Recurse -ErrorAction Stop)
         }
     }
     # filter requested documents
     $SkipEntirely = $SkipEntirely ?? [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
-    $sourceObjects = $sourceObjects | Where-Object {
+    $sourceObjects = @($sourceObjects | Where-Object {
         if ($SkipEntirely -contains $_.Extension.ToLower()) {return $false}
         return $true
-    }
+    })
 
     if ($IncludeDirectories.IsPresent) {
-        $sourceObjects = $sourceObjects |
-            Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) }
+        $sourceObjects = @($sourceObjects |
+            Where-Object { $_.PSIsContainer -or (-not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes) })
     } else {
-        $sourceObjects = $sourceObjects |
-            Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes }
+        $sourceObjects = @($sourceObjects |
+            Where-Object { -not $_.PSIsContainer -and $_.Length -lt $MaxItemBytes })
     }
     if (-not [string]::IsNullOrEmpty($filter)) {
         Write-Host "Applying filter: $filter" -ForegroundColor DarkGray
-        $sourceObjects = $sourceObjects | Where-Object { $_.Name -ilike "$filter" }
+        $sourceObjects = @($sourceObjects | Where-Object { $_.Name -ilike "$filter" })
     }
 
-    if (-not $sourceObjects -or $sourceObjects.count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
+    if (-not $sourceObjects -or $sourceObjects.Count -lt 1 -or-not (Test-DocumentSetSafety -Items $sourceObjects -MaxItems $MaxItems -MaxTotalBytes $MaxTotalBytes -MaxItemBytes $MaxItemBytes)) {
         Write-Warning "Not enough viable source objects in your target directory after filtering; aborting."
         return
     }    
 
     # initialize
-    Get-PSVersionCompatible; Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey;
+    Get-PSVersionCompatible
+    $currentVersionResult = Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey
+    [version]$script:CurrentHuduVersion = [version]("$($currentVersionResult | Select-Object -Last 1)")
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
 
 
     # region: destination company strategy
     $sameCompanyTarget = $null
-    if ($DestinationStrategy -eq 'SameCompany') {
-        $sameCompanyTarget = Select-ObjectFromList `
-            -Objects (Get-HuduCompanies) `
-            -Message "Which company to attribute documents in $TargetDocumentDir to? Choose a company or select '0' for Global KB."
-
+    if ($DestinationStrategy -eq 'SameCompany' -and -not [string]::IsNullOrWhiteSpace($SameCompanyName)) {
+        $sameCompanyTarget = ChoseBest-ByName -Name $SameCompanyName -choices @(Get-HuduCompanies -name $SameCompanyName)
         if (-not $sameCompanyTarget) {
-            Write-Host "No company selected; treating as Global KB." -ForegroundColor Yellow
-            $DestinationStrategy = 'GlobalKB'
+            Write-Warning "Could not match SameCompanyName '$SameCompanyName' to a Hudu company; choose from the list."
         }
+        $companies = @($sameCompanyTarget)
+    } else {
+        $companies = Get-HuduCompanies
     }
+
     $results = New-Object System.Collections.Generic.List[object]
-    $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
+    if (-not (Get-Variable -Name DateCompareJitterHours -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
 
     # region: main processing loop
     foreach ($sourceObject in $sourceObjects) {
@@ -151,6 +204,7 @@ param(
             $articleFromResourceRequest = @{
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
                 IncludeOriginals = ($IncludeOriginals ?? $true)
+                PlainTextPdfConversion = ($PlainTextPdfConversion ?? $true)
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null
@@ -159,6 +213,13 @@ param(
             $articleFromResourceRequest.includeOriginals = $IncludeOriginals ?? $true
             if ($DisallowedForConvert) {$articleFromResourceRequest.DisallowedForConvert = $DisallowedForConvert}
             if ($EmbeddableImageExtensions){ $articleFromResourceRequest.EmbeddableImageExtensions = $EmbeddableImageExtensions }
+            $sourceExtension = if ($sourceObject.PSIsContainer) { "" } else { [IO.Path]::GetExtension($sourceObject.Name).ToLowerInvariant() }
+            $resourcePreferences = Resolve-ResourceConversionPreferences `
+                -Extension $sourceExtension `
+                -BaseDisallowedForConvert $DisallowedForConvert `
+                -BaseEmbeddableImageExtensions $EmbeddableImageExtensions
+            $articleFromResourceRequest.DisallowedForConvert = $resourcePreferences.DisallowedForConvert
+            $articleFromResourceRequest.EmbeddableImageExtensions = $resourcePreferences.EmbeddableImageExtensions
             if ($true -eq $updateFilesOnMatch) {
                 $articleFromResourceRequest.updateOnMatch = $true
                 $articleFromResourceRequest.UpdateStrategy = $UpdateStrategy
@@ -173,14 +234,16 @@ param(
                         -Objects (Get-HuduCompanies) -allownull $true `
                         -Message "Which company to attribute `"$($articleFromResourceRequest.ResourceLocation)`" to? (Cancel for Global KB)"
 
-                    if ($target -and $target.name) {
-                        $articleFromResourceRequest.companyName = $target.name
+                    $targetName = Get-HuduObjectName -InputObject (Unwrap-HuduResultObject -InputObject $target -WrapperNames @('company'))
+                    if ($target -and $targetName) {
+                        $articleFromResourceRequest.companyName = $targetName
                     }
                 }
 
                 'SameCompany' {
-                    if ($sameCompanyTarget -and $sameCompanyTarget.name) {
-                        $articleFromResourceRequest.companyName = $sameCompanyTarget.name
+                    $sameCompanyTargetName = Get-HuduObjectName -InputObject $sameCompanyTarget
+                    if ($sameCompanyTarget -and $sameCompanyTargetName) {
+                        $articleFromResourceRequest.companyName = $sameCompanyTargetName
                     }
                 }
 
@@ -189,9 +252,14 @@ param(
                 }
             }
             # $VerbosePreference = 'Continue'
+            $newArticleCommand = Get-Command -Name New-HuduArticleFromLocalResource -ErrorAction Stop
+            foreach ($paramName in @($articleFromResourceRequest.Keys)) {
+                if (-not $newArticleCommand.Parameters.ContainsKey($paramName)) {
+                    $articleFromResourceRequest.Remove($paramName)
+                }
+            }
             write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
-            $result.GetEnumerator()
             $results.Add($result)
 
             Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green
@@ -206,7 +274,7 @@ param(
         }
     }
 
-    Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
+    Write-Host "Completed processing $($results.Count) items." -ForegroundColor Cyan
     if ($true -eq $PersistTempfiles) {
         Write-Host "Temporary files have been preserved at $DocConversionTempDir" -ForegroundColor Yellow
     } else {
@@ -214,4 +282,3 @@ param(
         Remove-Item -LiteralPath $DocConversionTempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    return $results

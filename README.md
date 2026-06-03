@@ -13,7 +13,7 @@ It uses the **community-supported [Articles-From-Anything](./Client-Libraries/Ar
 | Component | Required Version |
 |----------|------------------|
 | PowerShell | 7.5.1+ |
-| Hudu | 2.39.6+ |
+| Hudu | 2.40.2+ |
 | Windows | Any |
 | Hudu API Key | — |
 | LibreOffice | Latest MSI* |
@@ -28,22 +28,67 @@ This project serves as a **safe foundation** for:
 - Large-scale document migration
 - Directory ingestion
 - File-to-article conversion
+- Syncing Document Folders, Network Shares, Mounted Cloud Storages
+
+There is also now a GUI which allows for easy, one-off file syncs, conversions, article updates.
 
 ---
+
+# GUI Section
+
+To get the latest GUI, simply download the exe from releases section. The exe itself includes a self-extracting folder with everything we need, so that is completely sufficient.
+
+As you can see, the frontend is just a friendly and simple way of doing the same article syncs/conversions/creates as the CLI.
+
+<img width="1245" height="960" alt="image" src="https://github.com/user-attachments/assets/345af08e-bf9a-4ff5-9b23-3ace88b6a938" />
+
+There are friendly defaults included here, which can *optionally* be saved to a local settings file. It will not save your API key to this settings file and does not directly pass in your API key for security reasons. This means that after you close your GUI session, you'll have to re-enter your API key. You do not need to save settings in order to run files migration, but it does save time if you plan on undergoing the same operation more than once.
+
+It is generally reccomended to use recurse strategy so that any files you point at can be effectively read-in and tracked, but this is not necessary.
+
+like the CLI invocation style, temporary files are cleaned up on exit and all output is logged to file.
+It's quite simple. Fill in the form. When you have entered your API key, the invocation parameters that will be used are shown in preview (and can be refreshed)
+old or new log files can be accressed next to the launch button
+
+<img width="1199" height="862" alt="image" src="https://github.com/user-attachments/assets/09d5e803-b757-4c93-bb96-83a2bd7b2241" />
+
+# CLI Section
+
+To get the latest CLI, clone or download a zipfile of this repo.
 
 ## Script Parameters
 
 | Parameter | Description |
 |----------|-------------|
-| **TargetDocumentDir** *(required)* | Directory containing the articles to process. |
-| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. |
+| **TargetDocumentDir** *(required)* | File or directory containing the articles to process. |
+| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. Defaults to `Docs-Temp` under the project directory. |
 | **filter** | Case-insensitive file or directory filter. Supports wildcards (e.g., `*.pdf`, `keep*`). |
-| **DestinationStrategy** | Determines how articles are added to Hudu: `GlobalKb`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
-| **SourceStrategy** | Controls recursion: use `Recurse` to search subdirectories; omit to stay at a single level (will prompt if missing). |
+| **updateFilesOnMatch** | When `true`, matched existing articles can be updated according to `UpdateStrategy`. When `false`, matched articles are skipped. Default: **true**. |
+| **UpdateStrategy** | Match-update comparison mode: `filehash`, `date`, or `none`. Default: **filehash**. If `updateFilesOnMatch` is `false`, this is forced to `none` for processing. |
+| **DestinationStrategy** | Determines where articles are added: `GlobalKB`, `SameCompany`, or `VariousCompanies`. Optional; prompts if omitted. |
+| **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
+| **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
 | **MaxDepth** | Maximum recursion depth when using `Recurse`. Default: **5** levels. |
+| **PersistTempfiles** | Keep conversion temp files after the run instead of deleting `DocConversionTempDir`. Default: **false**. |
+| **HuduBaseUrl** | Hudu base URL. If omitted, the script prompts. Useful for frontend or unattended invocation. |
+| **HuduAPIKeySecure** | SecureString containing Hudu API key
+| **SameCompanyName** | Company name to use when `DestinationStrategy` is `SameCompany`. If omitted or not matched, no company is assigned and the article path behaves as Global KB. |
+| **ConvertExtensions** | Optional explicit conversion allow-list, e.g. `@(".docx",".xlsx",".csv")`. If non-empty, matching extensions are removed from the effective deny-list before processing and files outside this list are uploaded as attachment-only articles. If empty, falls back to `files-config.ps1`; if config is also empty, `DisallowedForConvert` controls conversion eligibility. |
+| **UploadAsArticleExtensions** | Optional explicit force-upload list, e.g. `@(".xlsx",".csv")`. Matching non-image files are added to the effective deny-list before processing and uploaded as attachment-only articles instead of converted. If empty, falls back to `files-config.ps1`; if config is also empty, no additional extensions are forced to upload-only. |
+
+### Parameter and Config Precedence
+
+For `ConvertExtensions` and `UploadAsArticleExtensions`, non-empty script parameters are explicit instructions and win over `files-config.ps1`. If the parameter is empty or omitted, the matching value from `files-config.ps1` is used. If both are empty, the script uses its normal defaults.
+
+Before each call to `New-HuduArticleFromLocalResource`, the main script resolves these preferences into effective `DisallowedForConvert` and `EmbeddableImageExtensions` values for that file. Explicit `UploadAsArticleExtensions` has highest priority. Explicit `ConvertExtensions` is next and can allow an extension even when config-level upload or deny preferences would otherwise block it. Config-level `UploadAsArticleExtensions`, config-level `ConvertExtensions`, and then `DisallowedForConvert` apply after that.
+
+File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Images listed in `EmbeddableImageExtensions` are embedded in articles. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
+
+Extension lists are normalized before use: values are lowercased, leading dots are added when missing, blank values are ignored, and duplicates are removed.
+
 
 ---
 
@@ -112,23 +157,8 @@ it will process the article as the html article and any images therein as images
 ---
 
 ## Idempotence, Updates & Storage Considerations
-Articles are created or updated idempotently. Embedded images within converted documents are reused when possible.
 
-### ⚠️ Directory Listings Are *Not* Fully Idempotent
-If you sync a directory multiple times:
-
-- All new files will be re-uploaded
-- Old attachments will *not* be automatically removed
-- Storage will grow unnecessarily
-
-### Why Not Automatically Remove Old Files?
-Because distinguishing “obsolete” vs. “intentionally retained” attachments requires:
-
-- File hash comparison
-- Full download of server content
-- Authentication cookie / session-based download logic
-
-This raises complexity and security implications—so it is not enabled at present
+Articles are created and updated idempotently. This is facilitated with both attachment/embed file-hasing and content-hashing with SHA256 algorithm. Embedded images within converted documents are reused when possible. If an attached/embed file is updated locally and remote file has a different file hash, the remote file will be updated if the local file's date is newer.
 
 ---
 
@@ -143,6 +173,12 @@ To configure any files that you wish to skip conversion for, upload as standalon
 If there is a specific format that you don't like to convert, like xlsx or xlsm, for example, you can add it to this array.
 
 `SkipEntirely` is an array of extensions that we simply want to try to avoid touching. These may be partially downloaded files, sensitive files, or files that we simply don't need or want in Hudu. There are some sane defaults in-place if you aren't sure.
+
+`ConvertExtensions` is optional. When populated, it becomes a conversion allow-list: only matching extensions, plus embeddable images, are converted or embedded. Everything else is uploaded as an attachment-only article. Leave it empty to use `DisallowedForConvert` as the broader conversion gate.
+
+`UploadAsArticleExtensions` is optional. When populated, matching non-image extensions are forced to upload-only article behavior even if LibreOffice could convert them.
+
+`PlainTextPdfConversion` is optional (default $true), if you set this to false, PDF files will be converted with PDF2HTML (poppler lib). if set to true or not included, these will be converted to plaintext with PDF2TXT (also poppler lib). Since PDF formatting varies wildly between sources and authoring programs, plaintext conversion is generally a bit more reliable. If your PDF files are from a known source that works well with conversion, however, you can opt to set this to $false, which will recreate the article from PDF with raster iamges, vector images, and everything possible. Sometimes, this does not work as expected, but can be fruitful given the quality of PDF files provided.
 
 ## Community & Socials
 

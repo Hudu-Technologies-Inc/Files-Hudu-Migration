@@ -29,4 +29,9 @@ $SkipEntirely = [System.Collections.ArrayList]@(
     ".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes"
 )
 
+# Optional allow/force-upload lists used when matching script params are empty.
+# Leave ConvertExtensions empty to use DisallowedForConvert as the conversion gate.
+$ConvertExtensions = @()
+$UploadAsArticleExtensions = @()
+
 $script:DateCompareJitterHours = [timespan]::FromHours(12)

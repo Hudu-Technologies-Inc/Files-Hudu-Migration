@@ -22,11 +22,120 @@ function Set-HuduInstance {
     New-HuduBaseURL $HuduBaseURL
 }
 
+function Normalize-ExtensionList {
+    param([string[]]$Extensions)
+    @($Extensions) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object {
+            $ext = "$_".Trim().ToLowerInvariant()
+            if (-not $ext.StartsWith(".")) { $ext = ".$ext" }
+            $ext
+        } |
+        Select-Object -Unique
+}
+
+function Convert-HuduSecureStringToPlainText {
+    param([securestring]$SecureString)
+
+    if ($null -eq $SecureString) {
+        return $null
+    }
+
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        if ([IntPtr]::Zero -ne $bstr) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
+}
+
+function Read-HuduApiKeyFromTransientFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "The transient Hudu API key file was not found."
+    }
+
+    try {
+        return ([IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8)).Trim()
+    } finally {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$requestedConvertExtensions = @(Normalize-ExtensionList -Extensions $requestedConvertExtensions)
+$requestedUploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $requestedUploadAsArticleExtensions)
+$configConvertExtensions = @(Normalize-ExtensionList -Extensions $configConvertExtensions)
+$configUploadAsArticleExtensions = @(Normalize-ExtensionList -Extensions $configUploadAsArticleExtensions)
+$explicitConvertExtensions = @($requestedConvertExtensions)
+$explicitUploadAsArticleExtensions = @($requestedUploadAsArticleExtensions)
+$ConvertExtensions = @(if ($requestedConvertExtensions.Count -gt 0) { $requestedConvertExtensions } else { $configConvertExtensions })
+$UploadAsArticleExtensions = @(if ($requestedUploadAsArticleExtensions.Count -gt 0) { $requestedUploadAsArticleExtensions } else { $configUploadAsArticleExtensions })
+$EmbeddableImageExtensions = @(Normalize-ExtensionList -Extensions $EmbeddableImageExtensions)
+$hasConvertExtensionFilter = $ConvertExtensions.Count -gt 0
+$ConvertExtensions = @($ConvertExtensions + $EmbeddableImageExtensions | Select-Object -Unique)
+$UploadAsArticleExtensions = @(
+    $UploadAsArticleExtensions |
+        Where-Object { $EmbeddableImageExtensions -notcontains $_ } |
+        Select-Object -Unique
+)
+
+function Resolve-ResourceConversionPreferences {
+    param(
+        [Parameter(Mandatory)][string]$Extension,
+        [System.Collections.ArrayList]$BaseDisallowedForConvert,
+        [string[]]$BaseEmbeddableImageExtensions
+    )
+
+    $effectiveDisallowedForConvert = [System.Collections.ArrayList]@($BaseDisallowedForConvert ?? @())
+    $effectiveEmbeddableImageExtensions = @($BaseEmbeddableImageExtensions ?? @())
+    if ([string]::IsNullOrWhiteSpace($Extension)) {
+        return @{
+            DisallowedForConvert = $effectiveDisallowedForConvert
+            EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
+            ForceUpload = $false
+            ExplicitConvert = $false
+        }
+    }
+
+    $sourceExtension = $Extension.ToLowerInvariant()
+    $isEmbeddableImage = $effectiveEmbeddableImageExtensions -contains $sourceExtension
+    $isExplicitUpload = (-not $isEmbeddableImage) -and ($explicitUploadAsArticleExtensions -contains $sourceExtension)
+    $isExplicitConvert = $explicitConvertExtensions -contains $sourceExtension
+    $isConfiguredUpload = (-not $isEmbeddableImage) -and ($UploadAsArticleExtensions -contains $sourceExtension)
+    $isExcludedByConvertAllowList = $hasConvertExtensionFilter -and -not ($ConvertExtensions -contains $sourceExtension)
+
+    $forceUpload = $isExplicitUpload -or (
+        -not $isExplicitConvert -and ($isConfiguredUpload -or $isExcludedByConvertAllowList)
+    )
+
+    if ($forceUpload) {
+        if (-not ($effectiveDisallowedForConvert -contains $sourceExtension)) {
+            [void]$effectiveDisallowedForConvert.Add($sourceExtension)
+        }
+        $effectiveEmbeddableImageExtensions = @(
+            $effectiveEmbeddableImageExtensions | Where-Object { "$_".ToLowerInvariant() -ne $sourceExtension }
+        )
+    } elseif ($hasConvertExtensionFilter) {
+        while ($effectiveDisallowedForConvert -contains $sourceExtension) {
+            $effectiveDisallowedForConvert.Remove($sourceExtension)
+        }
+    }
+
+    return @{
+        DisallowedForConvert = $effectiveDisallowedForConvert
+        EmbeddableImageExtensions = $effectiveEmbeddableImageExtensions
+        ForceUpload = $forceUpload
+        ExplicitConvert = $isExplicitConvert
+    }
+}
 function Set-HuduModuleInitialized {
     param (
             [string]$HAPImodulePath = "C:\Users\$env:USERNAME\Documents\GitHub\HuduAPI\HuduAPI\HuduAPI.psm1",
             [bool]$use_hudu_fork = $true,
-            [version]$RequiredHuduVersion = [version]"2.39.6",
+            [version]$RequiredHuduVersion = [version]"2.40.2",
             $DisallowedVersions = @([version]"2.37.0"),
             [string]$HuduApiRepositoryUrl = $($env:HUDUAPI_REPOSITORY_URL ?? "https://github.com/Hudu-Technologies-Inc/HuduAPI.git"),
             [string]$HuduApiBranch = $($env:HUDUAPI_REPOSITORY_BRANCH ?? "master"),
