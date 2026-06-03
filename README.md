@@ -36,6 +36,8 @@ There is also now a GUI which allows for easy, one-off file syncs, conversions, 
 
 # GUI Section
 
+To get the latest GUI, simply download the exe from releases section. The exe itself includes a self-extracting folder with everything we need, so that is completely sufficient.
+
 As you can see, the frontend is just a friendly and simple way of doing the same article syncs/conversions/creates as the CLI.
 
 <img width="1245" height="960" alt="image" src="https://github.com/user-attachments/assets/345af08e-bf9a-4ff5-9b23-3ace88b6a938" />
@@ -44,8 +46,6 @@ There are friendly defaults included here, which can *optionally* be saved to a 
 
 It is generally reccomended to use recurse strategy so that any files you point at can be effectively read-in and tracked, but this is not necessary.
 
-To get the latest GUI, you can clone, downlaod this repository as a zip, or simply download the exe from releases section. The exe itself includes a self-extracting folder with everything we need, so that is completely sufficient.
-
 like the CLI invocation style, temporary files are cleaned up on exit and all output is logged to file.
 It's quite simple. Fill in the form. When you have entered your API key, the invocation parameters that will be used are shown in preview (and can be refreshed)
 old or new log files can be accressed next to the launch button
@@ -53,6 +53,8 @@ old or new log files can be accressed next to the launch button
 <img width="1199" height="862" alt="image" src="https://github.com/user-attachments/assets/09d5e803-b757-4c93-bb96-83a2bd7b2241" />
 
 # CLI Section
+
+To get the latest CLI, clone or download a zipfile of this repo.
 
 ## Script Parameters
 
