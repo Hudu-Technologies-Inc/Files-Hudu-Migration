@@ -6,8 +6,12 @@ $rxAttr      = [Regex]::new('\b(?<name>src|href|data|poster)\s*=\s*(?<q>["''])(?
 $rxStyleAttr = [Regex]::new('\bstyle\s*=\s*(["''])(?<style>.*?)\1', [RegexOptions]::IgnoreCase -bor [RegexOptions]::Singleline)
 $rxCssUrl    = [Regex]::new('url\(\s*(["'']?)(?<u>[^)"'']+)\1\s*\)', [RegexOptions]::IgnoreCase -bor [RegexOptions]::Singleline)
 
-$huduapikey = $huduapikey ?? $(read-host "Please enter hudu api key")
-$hudubaseurl = $hudubaseurl ?? $(read-host "please enter hudu instance url")
+if (-not (Get-Variable -Name huduapikey -Scope Local -ErrorAction SilentlyContinue)) {
+    $huduapikey = $null
+}
+if (-not (Get-Variable -Name hudubaseurl -Scope Local -ErrorAction SilentlyContinue)) {
+    $hudubaseurl = $null
+}
 
 function Get-NormalizedTitle([string]$s) {
   if ([string]::IsNullOrWhiteSpace($s)) { return '' }
@@ -16,6 +20,42 @@ function Get-NormalizedTitle([string]$s) {
 function Get-TitleSlug([string]$s) {
   if ([string]::IsNullOrWhiteSpace($s)) { return '' }
   ($s -replace '[^\p{L}\p{Nd}]+','-').Trim('-').ToLowerInvariant()
+}
+function Get-ObjectPropertyValue {
+  param(
+    [object]$InputObject,
+    [Parameter(Mandatory)][string[]]$Names
+  )
+  if ($null -eq $InputObject) { return $null }
+  foreach ($name in $Names) {
+    $property = $InputObject.PSObject.Properties[$name]
+    if ($null -ne $property) {
+      return $property.Value
+    }
+  }
+  return $null
+}
+function Unwrap-HuduResultObject {
+  param(
+    [object]$InputObject,
+    [string[]]$WrapperNames = @('company', 'article', 'upload', 'HuduArticle')
+  )
+  $current = $InputObject
+  foreach ($wrapperName in $WrapperNames) {
+    $wrapped = Get-ObjectPropertyValue -InputObject $current -Names @($wrapperName)
+    if ($null -ne $wrapped) {
+      $current = $wrapped
+    }
+  }
+  return $current
+}
+function Get-HuduObjectName {
+  param([object]$InputObject)
+  return Get-ObjectPropertyValue -InputObject $InputObject -Names @('name', 'Name')
+}
+function Get-HuduObjectId {
+  param([object]$InputObject)
+  return Get-ObjectPropertyValue -InputObject $InputObject -Names @('id', 'Id')
 }
 function New-DocImageMap([object[]]$HuduImages) {
   $map = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
@@ -120,47 +160,52 @@ function Set-HuduArticleFromHtml {
   $matchedCompany = $null
   if ($CompanyName) {
     $huduCompanies = Get-HuduCompanies
-    $matchedCompany = $huduCompanies | Where-Object { $_.name -eq $CompanyName } | Select-Object -First 1
+    $matchedCompany = $huduCompanies | Where-Object { (Get-HuduObjectName -InputObject $_) -eq $CompanyName } | Select-Object -First 1
     if (-not $matchedCompany) {
       $matchedCompany = $huduCompanies | Where-Object {
-        (Test-Equiv -A $_.name -B $CompanyName) -or (Test-Equiv -A $_.nickname -B $CompanyName)
+        (Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $CompanyName) -or
+        (Test-Equiv -A (Get-ObjectPropertyValue -InputObject $_ -Names @('nickname', 'Nickname')) -B $CompanyName)
       } | Select-Object -First 1
     }
     if (-not $matchedCompany -and $CreateCompanyIfMissing) {
       $created = New-HuduCompany -Name $CompanyName
       $matchedCompany = ($created.company ?? $created)
     }
+    $matchedCompany = Unwrap-HuduResultObject -InputObject $matchedCompany -WrapperNames @('company')
   }
   # 2. resolve or create article
   $allHududocuments = Get-HuduArticles
   $matchedDocument = if ($matchedCompany) {
-    $allHududocuments | Where-Object { $_.company_id -eq $matchedCompany.id -and (Test-Equiv -A $_.name -B $Title) } | Select-Object -First 1
+    $matchedCompanyId = Get-HuduObjectId -InputObject $matchedCompany
+    $allHududocuments | Where-Object { (Get-ObjectPropertyValue -InputObject $_ -Names @('company_id', 'companyId', 'CompanyId')) -eq $matchedCompanyId -and (Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $Title) } | Select-Object -First 1
   } else {
-    $allHududocuments | Where-Object { Test-Equiv -A $_.name -B $Title } | Select-Object -First 1
+    $allHududocuments | Where-Object { Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $Title } | Select-Object -First 1
   }
   if (-not $matchedDocument) {
     $matchedDocument = if ($matchedCompany) {
-      (Get-HuduArticles -CompanyId $matchedCompany.id -Name $Title | Select-Object -First 1)
+      (Get-HuduArticles -CompanyId (Get-HuduObjectId -InputObject $matchedCompany) -Name $Title | Select-Object -First 1)
     } else {
       (Get-HuduArticles -Name $Title | Select-Object -First 1)
     }
   }
+  $matchedDocument = Unwrap-HuduResultObject -InputObject $matchedDocument -WrapperNames @('article')
   $newDocument = $null
   if (-not $matchedDocument) {
     $newDocument = if ($matchedCompany) {
-      New-HuduArticle -Name $Title -Content '[transfer in-progress]' -CompanyId $matchedCompany.id
+      New-HuduArticle -Name $Title -Content '[transfer in-progress]' -CompanyId (Get-HuduObjectId -InputObject $matchedCompany)
     } else {
       New-HuduArticle -Name $Title -Content '[transfer in-progress]'
     }
-    $newDocument = $newDocument.article ?? $newDocument
+    $newDocument = Unwrap-HuduResultObject -InputObject $newDocument -WrapperNames @('article')
   }
   $articleUsed = $matchedDocument ?? $newDocument
-  if (-not $articleUsed -or -not $articleUsed.id) {
+  $articleUsedId = Get-HuduObjectId -InputObject $articleUsed
+  if (-not $articleUsed -or -not $articleUsedId) {
     throw "Could not match or create article: '$Title' (Company: '$CompanyName')"
   }
 
   # 2) Idempotent uploads (company-scoped if company present; else global KB)
-  $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.Id }
+  $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsedId }
 
   $ImagesArray = @($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
   Write-Verbose "Processing $($ImagesArray.Count) images for article '$Title'..."
@@ -171,9 +216,9 @@ function Set-HuduArticleFromHtml {
     $imageFileName = ([IO.Path]::GetFileName($ImageFile)).Trim()
     $imageMetadata = Get-Item -LiteralPath $ImageFile -ErrorAction silentlycontinue
 
-    $existingUpload = $existingRelatedImages | Where-Object { $_.name -eq $imageFileName } | Select-Object -First 1
+    $existingUpload = $existingRelatedImages | Where-Object { (Get-HuduObjectName -InputObject $_) -eq $imageFileName } | Select-Object -First 1
     if (-not $existingUpload) {
-      $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A $_.name -B $imageFileName } | Select-Object -First 1
+      $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $imageFileName } | Select-Object -First 1
     }
     $existingUpload = $existingUpload.upload ?? $existingUpload
     if ($null -ne $existingUpload -and $true -eq $CalculateHashes -and $existingUpload.id -gt 0) {
@@ -196,7 +241,7 @@ function Set-HuduArticleFromHtml {
     }
 
     if (-not $existingUpload) {
-        $uploaded = New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id
+        $uploaded = New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsedId
         $uploaded = $uploaded.upload ?? $uploaded
     }
 
@@ -1079,12 +1124,17 @@ function New-HuduArticleFromLocalResource {
         return $results
     }
     if (-not ([string]::IsNullOrEmpty($companyName))){
-        $results.Company = $(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies -name $companyName)) ?? $null
+        $results.Company = Unwrap-HuduResultObject -InputObject ($(ChoseBest-ByName -Name $companyName -choices $(get-huducompanies -name $companyName)) ?? $null) -WrapperNames @('company')
     }
     $results.IsGlobalKB = [bool]$($null -eq $results.Company)
-    Write-Info "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$($results.Company.name)' KB"}) will be target for this article"
+    $targetCompanyName = if ($results.IsGlobalKB) { $null } else { Get-HuduObjectName -InputObject $results.Company }
+    $targetCompanyId = if ($results.IsGlobalKB) { $null } else { Get-HuduObjectId -InputObject $results.Company }
+    if (-not $results.IsGlobalKB -and [string]::IsNullOrWhiteSpace([string]$targetCompanyName)) {
+        $targetCompanyName = $companyName
+    }
+    Write-Info "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$targetCompanyName' KB"}) will be target for this article"
 
-    $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $results.Company.id})
+    $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $targetCompanyId})
     $results.OriginalDoc = Get-Item -LiteralPath $resourceLocation
     $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
     $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
@@ -1095,7 +1145,7 @@ function New-HuduArticleFromLocalResource {
         $results.Strategy = "user-supplied path appears to be a directory. proccing it as a resource itself (gallery of photos, index of files)"; Write-Info -Message $results.Strategy
         try {
             $results.NewDoc = if ($null -ne $results.Company) {
-                Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc -companyName $results.Company.name
+                Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc -companyName $targetCompanyName
             } else {
                 Set-HuduArticleFromResourceFolder -resourcesFolder $results.OriginalDoc
             }
@@ -1125,24 +1175,34 @@ function New-HuduArticleFromLocalResource {
         )
         if (-not $currentPolicyCreatesArticleContent) { return $false }
 
-        $content = "$($Article.content)"
+        $content = "$(Get-ObjectPropertyValue -InputObject $Article -Names @('content', 'Content'))"
         return ($content -match '(?i)Attaching Upload|See Attached Document')
     }
 
-    $exactMatch = $exactMatch ?? $($companyDocs | Where-Object {$_.name -ieq $results.originalName -or $_.name -ieq $results.OriginalDoc.Name} | Select-Object -First 1)
-    $exactMatch = $exactMatch ?? $(if ($true -eq $results.IsGlobalKB) {get-huduarticles -name $results.originalName | where-object {$null -eq $_.company_id}} else {$companyDocs | Where-Object { $_.name -ieq $results.originalName } | Select-Object -First 1})
+    $exactMatch = $exactMatch ?? $($companyDocs | Where-Object {
+        $docName = Get-HuduObjectName -InputObject $_
+        $docName -ieq $results.originalName -or $docName -ieq $results.OriginalDoc.Name
+    } | Select-Object -First 1)
+    $exactMatch = $exactMatch ?? $(if ($true -eq $results.IsGlobalKB) {
+        get-huduarticles -name $results.originalName | where-object {
+            $null -eq (Get-ObjectPropertyValue -InputObject $_ -Names @('company_id', 'companyId', 'CompanyId'))
+        }
+    } else {
+        $companyDocs | Where-Object { (Get-HuduObjectName -InputObject $_) -ieq $results.originalName } | Select-Object -First 1
+    })
 
     if ($exactMatch) {
-        $results.MatchedDoc = $exactMatch.article ?? $exactMatch
-            write-info "Exact match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) article found with name '$($results.MatchedDoc.name)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
+        $results.MatchedDoc = Unwrap-HuduResultObject -InputObject $exactMatch -WrapperNames @('article')
+            write-info "Exact match for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$targetCompanyName' KB"}) article found with name '$(Get-HuduObjectName -InputObject $results.MatchedDoc)'. This will be the matched document used for update comparison and potential update if updateOnMatch is enabled."
     } else {
         $MatchedDocs = $companyDocs | Where-Object {
-            (Test-Equiv -A $_.name -B $results.originalName) -or
-            (Test-Equiv -A $_.name -B $results.OriginalDoc.Name) 
+            $docName = Get-HuduObjectName -InputObject $_
+            (Test-Equiv -A $docName -B $results.originalName) -or
+            (Test-Equiv -A $docName -B $results.OriginalDoc.Name)
         }
         if ($MatchedDocs) {
             $results.MatchedDoc = ($MatchedDocs | Select-Object -First 1)
-            $results.MatchedDoc = $results.MatchedDoc.article ?? $results.MatchedDoc
+            $results.MatchedDoc = Unwrap-HuduResultObject -InputObject $results.MatchedDoc -WrapperNames @('article')
         }
     }
     if ($null -ne $results.MatchedDoc) {
@@ -1154,23 +1214,24 @@ function New-HuduArticleFromLocalResource {
         } 
         $matchedSourceUpload = Get-HuduUploads |
             Where-Object {
-                $_.uploadable_id -eq $results.MatchedDoc.id -and
+                $_.uploadable_id -eq (Get-HuduObjectId -InputObject $results.MatchedDoc) -and
                 $_.uploadable_type -eq 'Article' -and
-                ($_.name -ieq $results.OriginalDoc.Name -or $_.name -ieq $results.originalName)
+                ((Get-HuduObjectName -InputObject $_) -ieq $results.OriginalDoc.Name -or (Get-HuduObjectName -InputObject $_) -ieq $results.originalName)
             } |
             Select-Object -First 1
         $matchedSourceUpload = $matchedSourceUpload.upload ?? $matchedSourceUpload
+        $matchedDocName = Get-HuduObjectName -InputObject $results.MatchedDoc
 
         if ($UpdateStrategy -ieq 'date') {
-            $destUpload = $matchedSourceUpload ?? @($results.MatchedDoc.attachments)[0]
+            $destUpload = $matchedSourceUpload ?? @((Get-ObjectPropertyValue -InputObject $results.MatchedDoc -Names @('attachments', 'Attachments')))[0]
 
             if (-not $destUpload) {
-                Write-Info "Matched article '$($results.MatchedDoc.name)' has no existing attachment metadata; proceeding with update."
+                Write-Info "Matched article '$matchedDocName' has no existing attachment metadata; proceeding with update."
                 $shouldUpdate = $true
             } else {
                 $shouldUpdate = Test-ShouldUpdateUpload `
                     -UpdateOnMatch $updateOnMatch `
-                    -Strategy $results.UpdateStrategy `
+                    -Strategy $UpdateStrategy `
                     -SourceMTimeUtc $results.SourceLastModified `
                     -DestUpload $destUpload
             }
@@ -1181,12 +1242,12 @@ function New-HuduArticleFromLocalResource {
 
             $results.Action = if ($shouldUpdate) {
                 if ($matchedArticleNeedsContentRebuild) {
-                    "Matched existing article '$($results.MatchedDoc.name)' but it is attachment-only and current policy creates article content; proceeding with update."
+                    "Matched existing article '$matchedDocName' but it is attachment-only and current policy creates article content; proceeding with update."
                 } else {
-                    "Matched existing article '$($results.MatchedDoc.name)' but source is newer or no dest upload exists; proceeding with update."
+                    "Matched existing article '$matchedDocName' but source is newer or no dest upload exists; proceeding with update."
                 }
             } else {
-                "Matched existing article '$($results.MatchedDoc.name)' and source is not newer; skipping update."
+                "Matched existing article '$matchedDocName' and source is not newer; skipping update."
             }
 
             Write-Info -Message $results.Action
@@ -1197,20 +1258,20 @@ function New-HuduArticleFromLocalResource {
             }
         }
         elseif ($UpdateStrategy -ieq 'filehash') {
-            $destUpload = $matchedSourceUpload ?? @($results.MatchedDoc.attachments)[0]
+            $destUpload = $matchedSourceUpload ?? @((Get-ObjectPropertyValue -InputObject $results.MatchedDoc -Names @('attachments', 'Attachments')))[0]
 
             if (-not $destUpload) {
-                Write-Info "Matched article '$($results.MatchedDoc.name)' has no existing attachment metadata; proceeding with update."
+                Write-Info "Matched article '$matchedDocName' has no existing attachment metadata; proceeding with update."
                 $shouldUpdate = $true
-            } elseif ($matchedSourceUpload -and $matchedSourceUpload.id -and $true -eq $results.CalculateEmbedHashes) {
+            } elseif ($matchedSourceUpload -and (Get-HuduObjectId -InputObject $matchedSourceUpload) -and $true -eq $results.CalculateEmbedHashes) {
                 try {
-                    $results.AttachmentHashInfo = Compare-UploadHashWithFile -UploadId $matchedSourceUpload.id -LocalFile $results.OriginalDoc.FullName
+                    $results.AttachmentHashInfo = Compare-UploadHashWithFile -UploadId (Get-HuduObjectId -InputObject $matchedSourceUpload) -LocalFile $results.OriginalDoc.FullName
                     $shouldUpdate = -not $results.AttachmentHashInfo.SameFile
                 } catch {
                     Write-Warning "Could not compare existing upload hash for '$($results.OriginalDoc.Name)': $($_.Exception.Message). Falling back to metadata comparison."
                     $shouldUpdate = Test-ShouldUpdateUpload `
                         -UpdateOnMatch $updateOnMatch `
-                        -Strategy $results.UpdateStrategy `
+                        -Strategy $UpdateStrategy `
                         -SourceMTimeUtc $results.SourceLastModified `
                         -SourceSha256 $results.FileHash `
                         -DestUpload $destUpload
@@ -1218,7 +1279,7 @@ function New-HuduArticleFromLocalResource {
             } else {
                 $shouldUpdate = Test-ShouldUpdateUpload `
                     -UpdateOnMatch $updateOnMatch `
-                    -Strategy $results.UpdateStrategy `
+                    -Strategy $UpdateStrategy `
                     -SourceMTimeUtc $results.SourceLastModified `
                     -SourceSha256 $results.FileHash `
                     -DestUpload $destUpload
@@ -1230,12 +1291,12 @@ function New-HuduArticleFromLocalResource {
 
             $results.Action = if ($shouldUpdate) {
                 if ($matchedArticleNeedsContentRebuild) {
-                    "Matched existing article '$($results.MatchedDoc.name)' but it is attachment-only and current policy creates article content; proceeding with update."
+                    "Matched existing article '$matchedDocName' but it is attachment-only and current policy creates article content; proceeding with update."
                 } else {
-                    "Matched existing article '$($results.MatchedDoc.name)' but file hash differs or no dest upload exists; proceeding with update."
+                    "Matched existing article '$matchedDocName' but file hash differs or no dest upload exists; proceeding with update."
                 }
             } else {
-                "Matched existing article '$($results.MatchedDoc.name)' and file hash matches; skipping update."
+                "Matched existing article '$matchedDocName' and file hash matches; skipping update."
             }
 
             Write-Info -Message $results.Action
@@ -1245,7 +1306,7 @@ function New-HuduArticleFromLocalResource {
                 return $results
             }
         }        
-    } else {Write-Info "No existing article match found for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$($results.Company.name)' KB"}) with name matching '$($results.originalName)'. A new article will be created."}
+    } else {Write-Info "No existing article match found for $(if ($true -eq $results.IsGlobalKB) {"Global KB"} else {"Company '$targetCompanyName' KB"}) with name matching '$($results.originalName)'. A new article will be created."}
 
       
     try {
@@ -1255,10 +1316,10 @@ function New-HuduArticleFromLocalResource {
         $results.HtmlPath = [IO.Path]::Combine($DocConversionTempDir,"$safeName-$(Get-Date -Format 'yyyyMMddHHmmss').html")
         $html = Get-HTMLTemplatedScriptContent -FilePath $results.OriginalDoc.FullName -Heading $results.originalName -OutputPath $results.HtmlPath
         Write-Verbose "HTML from script generated at $($results.HtmlPath) with contents $($html | Out-String)"
-        $results.NewDoc = Set-HuduArticleFromHtml -ImagesArray @() -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) -Title $results.originalName -HtmlContents $html -CalculateHashes $results.CalculateEmbedHashes
+        $results.NewDoc = Set-HuduArticleFromHtml -ImagesArray @() -CompanyName $(if ($results.IsGlobalKB) { '' } else { $targetCompanyName }) -Title $results.originalName -HtmlContents $html -CalculateHashes $results.CalculateEmbedHashes
     } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Info -Message $results.Strategy
-        $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $results.Company.name }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
+        $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $targetCompanyName }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
     }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
@@ -1289,7 +1350,7 @@ function New-HuduArticleFromLocalResource {
                     $results.NewDoc = if ($results.IsGlobalKB) {
                         New-HuduArticle -name $results.originalName -content "Attaching Upload"
                     } else {
-                        New-HuduArticle -name $results.originalName -companyId $results.Company.id -content "Attaching Upload"
+                        New-HuduArticle -name $results.originalName -companyId $targetCompanyId -content "Attaching Upload"
                     }
                 }
             } else {
@@ -1307,7 +1368,7 @@ function New-HuduArticleFromLocalResource {
                         $results.NewDoc = if ($results.IsGlobalKB) {
                             New-HuduArticle -name $results.originalName -content "Attaching Upload"
                         } else {
-                            New-HuduArticle -name $results.originalName -companyId $results.Company.id -content "Attaching Upload"
+                            New-HuduArticle -name $results.originalName -companyId $targetCompanyId -content "Attaching Upload"
                         }
                     }
                 } else {
@@ -1318,16 +1379,16 @@ function New-HuduArticleFromLocalResource {
             }
     # standalone article-as-attachment process [not pdf or convertable]
       } else {
-        $results.Strategy = "Processing as Attachment to Reference Article, as file cannot be converted and $(if ($null -ne $results.MatchedDoc){"Article with id $($results.MatchedDoc.id) will be updated"} else {"a new article will be created"})."; Write-Info -Message $results.Strategy
+        $results.Strategy = "Processing as Attachment to Reference Article, as file cannot be converted and $(if ($null -ne $results.MatchedDoc){"Article with id $(Get-HuduObjectId -InputObject $results.MatchedDoc) will be updated"} else {"a new article will be created"})."; Write-Info -Message $results.Strategy
         if ($null -ne $results.MatchedDoc){
-            $existingUpload = get-huduuploads | where-object {$_.uploadable_id -eq $results.MatchedDoc.id -and $_.uploadable_type -eq 'Article' -and $_.name -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingUpload = $existingUpload.upload ?? $existingUpload;            
+            $existingUpload = get-huduuploads | where-object {$_.uploadable_id -eq (Get-HuduObjectId -InputObject $results.MatchedDoc) -and $_.uploadable_type -eq 'Article' -and (Get-HuduObjectName -InputObject $_) -ieq $results.OriginalDoc.Name} | select-object -first 1; $existingUpload = $existingUpload.upload ?? $existingUpload;
             $results.NewDoc = $results.MatchedDoc
         }
         if (-not $results.NewDoc) {
             $results.NewDoc = if ($results.IsGlobalKB) {
                 New-HuduArticle -name $results.originalName -content "Attaching Upload"
             } else {
-                New-HuduArticle -name $results.originalName -companyId $results.Company.id -content "Attaching Upload"
+                New-HuduArticle -name $results.originalName -companyId $targetCompanyId -content "Attaching Upload"
             }
         }
     }
@@ -1335,7 +1396,8 @@ function New-HuduArticleFromLocalResource {
     $results.ArticleResult = $results.NewDoc
     $results.NewDoc = $results.NewDoc.HuduArticle ?? $results.NewDoc.article ?? $results.NewDoc            
 
-    if ($null -eq $results.NewDoc -or -not $results.NewDoc.id) {
+    $newDocId = Get-HuduObjectId -InputObject $results.NewDoc
+    if ($null -eq $results.NewDoc -or -not $newDocId) {
         $results.Error = "New Document object $($results.NewDoc | Out-String) unexpectedly came back empty"
         Write-Error $results.Error
         return $results
@@ -1343,7 +1405,7 @@ function New-HuduArticleFromLocalResource {
 
     # process uploads if required
     if ($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) {
-        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $results.NewDoc.id -and $_.uploadable_type -eq 'Article' -and ($_.name -ieq $results.OriginalDoc.Name -or $_.name -ieq $results.originalName)} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
+        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $newDocId -and $_.uploadable_type -eq 'Article' -and ((Get-HuduObjectName -InputObject $_) -ieq $results.OriginalDoc.Name -or (Get-HuduObjectName -InputObject $_) -ieq $results.originalName)} | select-object -first 1; $existingupload = $existingupload.upload ?? $existingupload;
         if ($null -ne $existingupload){
             Write-Verbose "An existing upload (attachment) was found."
             if ($script:CurrentHuduVersion -lt [version]("2.41.0")){
@@ -1366,14 +1428,14 @@ function New-HuduArticleFromLocalResource {
                 }
             }
         } else {$results.attachmentStatus = "No existing upload found. Proceeding to upload new file."; Write-Verbose $results.attachmentStatus;}
-        $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $results.NewDoc.id -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
+        $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $newDocId -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
         $results.Upload = $results.Upload.upload ?? $results.Upload
     }
     if ($false -eq $results.AllowedToConvertFile){
         $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
-            Set-HuduArticle -id $results.NewDoc.id -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
+            Set-HuduArticle -id $newDocId -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
         } else {
-            Set-HuduArticle -id $results.NewDoc.id -companyId $results.Company.id -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
+            Set-HuduArticle -id $newDocId -companyId $targetCompanyId -content "<a href='$($results.Upload.url)'>See Attached Document, $($results.OriginalDoc.Name)</a>"
         }        
         $results.NewDoc = $results.NewDoc.article ?? $results.NewDoc
     }
@@ -2408,21 +2470,34 @@ function Set-PrintAndLog {
     Add-Content -Path $LogFile -Value $logline
 }
 function Select-ObjectFromList($objects, $message, $inspectObjects = $false, $allowNull = $false) {
+    $items = @($objects)
     $validated = $false
     while (-not $validated) {
         if ($allowNull) {
             Write-Host "0: None/Custom"
         }
 
-        for ($i = 0; $i -lt $objects.Count; $i++) {
-            $object = $objects[$i]
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $object = $items[$i]
+            $optionMessage = $null
+            $name = $null
+            if ($null -ne $object) {
+                $optionMessageProperty = $object.PSObject.Properties['OptionMessage']
+                if ($null -ne $optionMessageProperty) {
+                    $optionMessage = $optionMessageProperty.Value
+                }
+                $nameProperty = $object.PSObject.Properties['name']
+                if ($null -ne $nameProperty) {
+                    $name = $nameProperty.Value
+                }
+            }
 
             $displayLine = if ($inspectObjects) {
                 "$($i+1): $(Write-InspectObject -object $object)"
-            } elseif ($null -ne $object.OptionMessage) {
-                "$($i+1): $($object.OptionMessage)"
-            } elseif ($null -ne $object.name) {
-                "$($i+1): $($object.name)"
+            } elseif (-not [string]::IsNullOrWhiteSpace([string]$optionMessage)) {
+                "$($i+1): $optionMessage"
+            } elseif (-not [string]::IsNullOrWhiteSpace([string]$name)) {
+                "$($i+1): $name"
             } else {
                 "$($i+1): $($object)"
             }
@@ -2432,19 +2507,20 @@ function Select-ObjectFromList($objects, $message, $inspectObjects = $false, $al
 
         $choice = Read-Host $message
 
-        if (-not ($choice -as [int])) {
+        $parsedChoice = 0
+        if (-not [int]::TryParse([string]$choice, [ref]$parsedChoice)) {
             Write-Host "Invalid input. Please enter a number." -ForegroundColor Red
             continue
         }
 
-        $choice = [int]$choice
+        $choice = $parsedChoice
 
         if ($choice -eq 0 -and $allowNull) {
             return $null
         }
 
-        if ($choice -ge 1 -and $choice -le $objects.Count) {
-            return $objects[$choice - 1]
+        if ($choice -ge 1 -and $choice -le $items.Count) {
+            return $items[$choice - 1]
         } else {
             Write-Host "Invalid selection. Please enter a number from the list." -ForegroundColor Red
         }

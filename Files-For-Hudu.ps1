@@ -80,24 +80,42 @@ param(
     $requestedUploadAsArticleExtensions = @($UploadAsArticleExtensions)
     $ConvertExtensions = $null
     $UploadAsArticleExtensions = $null
-    
+
+    $defaultEmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
+    $defaultDisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
+    $defaultSkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
+
+    # Load config before helper scripts because helpers/init.ps1 normalizes these values at import time.
+    try {
+        . (Join-Path $WorkDir "files-config.ps1")
+    } catch {
+        Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
+    }
+
+    if (-not (Get-Variable -Name EmbeddableImageExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $EmbeddableImageExtensions) {
+        $EmbeddableImageExtensions = $defaultEmbeddableImageExtensions
+    }
+    if (-not (Get-Variable -Name DisallowedForConvert -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $DisallowedForConvert) {
+        $DisallowedForConvert = $defaultDisallowedForConvert
+    }
+    if (-not (Get-Variable -Name SkipEntirely -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $SkipEntirely) {
+        $SkipEntirely = $defaultSkipEntirely
+    }
+    if (-not (Get-Variable -Name ConvertExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $ConvertExtensions) {
+        $ConvertExtensions = @()
+    }
+    if (-not (Get-Variable -Name UploadAsArticleExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $UploadAsArticleExtensions) {
+        $UploadAsArticleExtensions = @()
+    }
+
+    $configConvertExtensions = @($ConvertExtensions)
+    $configUploadAsArticleExtensions = @($UploadAsArticleExtensions)
 
     # Load helper scripts
     foreach ($file in (Get-ChildItem -Path (Join-Path $WorkDir "helpers") -Filter "*.ps1" -File | Sort-Object Name)) {
         Write-Host "Importing helper: $($file.Name)" -ForegroundColor DarkBlue
         . $file.FullName
     }
-    try {
-        . .\files-config.ps1
-    } catch {
-        Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
-        $EmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
-        $DisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
-        $SkipEntirely = [System.Collections.ArrayList]@(".tmp", ".log", ".ds_store", ".thumbs", ".lnk", ".ini", ".db", ".bak", ".old", ".partial", ".env", ".gitignore", ".gitattributes")
-    }
-    $configConvertExtensions = @($ConvertExtensions)
-    $configUploadAsArticleExtensions = @($UploadAsArticleExtensions)
-
 
     # Ensure or prompt for params and directories
     Get-EnsuredPath -Path $DocConversionTempDir
@@ -173,7 +191,9 @@ param(
     }
 
     $results = New-Object System.Collections.Generic.List[object]
-    $script:DateCompareJitterHours = $script:DateCompareJitterHours ?? $([timespan]::FromHours(12))
+    if (-not (Get-Variable -Name DateCompareJitterHours -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
 
     # region: main processing loop
     foreach ($sourceObject in $sourceObjects) {
@@ -242,7 +262,7 @@ param(
         }
     }
 
-    Write-Host "Completed processing $($results.Count) items. Results will be written to $resultsFile" -ForegroundColor Cyan
+    Write-Host "Completed processing $($results.Count) items." -ForegroundColor Cyan
     if ($true -eq $PersistTempfiles) {
         Write-Host "Temporary files have been preserved at $DocConversionTempDir" -ForegroundColor Yellow
     } else {
