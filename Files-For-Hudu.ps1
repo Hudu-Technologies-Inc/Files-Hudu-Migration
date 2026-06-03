@@ -250,4 +250,3 @@ param(
         Remove-Item -LiteralPath $DocConversionTempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    return $results
