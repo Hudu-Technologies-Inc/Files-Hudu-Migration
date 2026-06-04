@@ -811,12 +811,11 @@ function Set-HuduArticleFromPDF {
       $articleUsed = Unwrap-HuduResultObject -InputObject $articleUsed -WrapperNames @('article')
     }
 
-    $existingUpload = Get-HuduUploads |
-      Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsed.id -and $_.name -ieq ([IO.Path]::GetFileName($PdfPath)) } |
-      Select-Object -First 1
-    $existingUpload = Unwrap-HuduResultObject -InputObject $existingUpload -WrapperNames @('upload')
-    $upload = $existingUpload ?? $(New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $articleUsed.Id)
-    $upload = Unwrap-HuduResultObject -InputObject $upload -WrapperNames @('upload')
+    $uploadInfo = Ensure-HuduArticleUploadForFile `
+      -ArticleId $articleUsed.id `
+      -FilePath $PdfPath `
+      -CalculateHashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
+    $upload = $uploadInfo.Upload
 
     $content = "<h2>$([System.Net.WebUtility]::HtmlEncode([IO.Path]::GetFileName($PdfPath)))</h2><p>Converted HTML was $($pdfData.Html.Length) characters, over limit $MaxHtmlCharacters. Original file attached instead.</p><p><a href='$($upload.url)'>See attached document</a></p>"
     $updatedArticle = if ($matchedCompany) {
@@ -835,6 +834,8 @@ function Set-HuduArticleFromPDF {
       EmbedInfo   = @("PDF converted HTML was $($pdfData.Html.Length) characters, over limit $MaxHtmlCharacters. Used attachment-only fallback.")
       Rewrites    = @()
       Unresolved  = @()
+      OriginalUpload = $upload
+      OriginalUploadInfo = $uploadInfo
     }
   }
 
@@ -846,7 +847,12 @@ function Set-HuduArticleFromPDF {
               -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
 
   if ($true -eq $includeOriginal){
-    New-HuduUpload -FilePath $PdfPath -Uploadable_Type 'Article' -Uploadable_Id $newDoc.HuduArticle.Id | Out-Null
+    $uploadInfo = Ensure-HuduArticleUploadForFile `
+      -ArticleId $newDoc.HuduArticle.Id `
+      -FilePath $PdfPath `
+      -CalculateHashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
+    $newDoc | Add-Member -MemberType NoteProperty -Name OriginalUpload -Value $uploadInfo.Upload -Force
+    $newDoc | Add-Member -MemberType NoteProperty -Name OriginalUploadInfo -Value $uploadInfo -Force
   }
 
   return $newDoc
@@ -1445,7 +1451,18 @@ function New-HuduArticleFromLocalResource {
             } elseif ($matchedSourceUpload -and (Get-HuduObjectId -InputObject $matchedSourceUpload) -and $true -eq $results.CalculateEmbedHashes) {
                 try {
                     $results.AttachmentHashInfo = Compare-UploadHashWithFile -UploadId (Get-HuduObjectId -InputObject $matchedSourceUpload) -LocalFile $results.OriginalDoc.FullName
-                    $shouldUpdate = -not $results.AttachmentHashInfo.SameFile
+                    if ($true -eq $results.AttachmentHashInfo.SameFile) {
+                        $shouldUpdate = $false
+                    } else {
+                        $matchedUploadDate = Get-HuduObjectDateUtc -InputObject $matchedSourceUpload
+                        if ($matchedUploadDate) {
+                            $results.RemoteAttachmentUTCdate = $matchedUploadDate.Add($script:DateCompareJitterHours)
+                            $results.LocalAttachmentNewer = $results.SourceLastModified -gt $results.RemoteAttachmentUTCdate
+                        } else {
+                            $results.LocalAttachmentNewer = $true
+                        }
+                        $shouldUpdate = $true -eq $results.LocalAttachmentNewer
+                    }
                 } catch {
                     Write-Warning "Could not compare existing upload hash for '$($results.OriginalDoc.Name)': $($_.Exception.Message). Falling back to metadata comparison."
                     $shouldUpdate = Test-ShouldUpdateUpload `
@@ -1474,6 +1491,8 @@ function New-HuduArticleFromLocalResource {
                 } else {
                     "Matched existing article '$matchedDocName' but file hash differs or no dest upload exists; proceeding with update."
                 }
+            } elseif ($results.AttachmentHashInfo -and $false -eq $results.AttachmentHashInfo.SameFile -and $false -eq $results.LocalAttachmentNewer) {
+                "Matched existing article '$matchedDocName' and file hash differs, but local file is not newer than the matched upload; skipping update."
             } else {
                 "Matched existing article '$matchedDocName' and file hash matches; skipping update."
             }
@@ -1505,7 +1524,16 @@ function New-HuduArticleFromLocalResource {
     }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
-        $results.NewDoc = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters -PlainTextConversion $PlainTextPdfConversion
+        $pdfArticleResult = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters -PlainTextConversion $PlainTextPdfConversion
+        $pdfUploadInfo = Get-ObjectPropertyValue -InputObject $pdfArticleResult -Names @('OriginalUploadInfo')
+        if ($pdfUploadInfo) {
+            $results.Upload = $pdfUploadInfo.Upload
+            $results.attachmentStatus = $pdfUploadInfo.Status
+            $results.AttachmentHashInfo = $pdfUploadInfo.HashInfo
+            $results.LocalAttachmentNewer = $pdfUploadInfo.LocalAttachmentNewer
+            $results.RemoteAttachmentUTCdate = $pdfUploadInfo.RemoteAttachmentUTCdate
+        }
+        $results.NewDoc = $pdfArticleResult
         $results.NewDoc = Unwrap-HuduResultObject -InputObject $results.NewDoc -WrapperNames @('HuduArticle', 'article')
     } elseif ($true -eq $results.AllowedToConvertFile) {
     # conversion process - non-pdf [but convertable]
@@ -1589,34 +1617,19 @@ function New-HuduArticleFromLocalResource {
     }
 
     # process uploads if required
-    if ($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) {
-        $existingupload = get-huduuploads | where-object {$_.uploadable_id -eq $newDocId -and $_.uploadable_type -eq 'Article' -and ((Get-HuduObjectName -InputObject $_) -ieq $results.OriginalDoc.Name -or (Get-HuduObjectName -InputObject $_) -ieq $results.originalName)} | select-object -first 1; $existingupload = Unwrap-HuduResultObject -InputObject $existingupload -WrapperNames @('upload')
-        if ($null -ne $existingupload){
-            Write-Verbose "An existing upload (attachment) was found."
-            if ($script:CurrentHuduVersion -lt [version]("2.41.0")){
-                $results.attachmentStatus =  "Existing attachment upload found for article, but current Hudu version $script:CurrentHuduVersion does not support hash comparison. Using existing attachment/upload as-is. Update to hudu version 2.41.0 or newer to enable hash comparison."; Write-Verbose $results.attachmentStatus;
-            } else {
-                $existingUploadId = Get-HuduObjectId -InputObject $existingupload
-                $results.AttachmentHashInfo = Compare-UploadHashWithFile -uploadId $existingUploadId -FilePath $results.OriginalDoc.FullName
-                $existingUploadCreatedDate = Get-ObjectPropertyValue -InputObject $existingupload -Names @('created_date', 'created_at', 'updated_at')
-                $results.RemoteAttachmentUTCdate = (([datetime]$existingUploadCreatedDate).add($script:DateCompareJitterHours)).ToUniversalTime()
-                $results.LocalAttachmentNewer = $results.SourceLastModified -gt $results.RemoteAttachmentUTCdate
-                if ($true -eq $results.AttachmentHashInfo.SameFile){
-                    $results.attachmentStatus = "Hashes match, skipping upload or replace"; Write-Verbose $results.attachmentStatus;
-                } else {
-                    if ($true -eq $results.LocalAttachmentNewer) {
-                        $results.attachmentStatus = "Existing attachment upload is older $($results.RemoteAttachmentUTCdate) and has different hash ($($results.AttachmentHashInfo.localHash) vs $($results.AttachmentHashInfo.UploadHash)). Deleting existing upload to replace with new version."; Write-Verbose $results.attachmentStatus;
-                        Remove-HuduUpload -id $existingUploadId -confirm:$false
-                        $existingupload = $null
-                    } else {
-                        $results.attachmentStatus = "Existing attachment upload appears newest. No need to replace."; Write-Verbose $results.attachmentStatus;
-                        $results.Upload = $existingupload
-                    }
-                }
-            }
-        } else {$results.attachmentStatus = "No existing upload found. Proceeding to upload new file."; Write-Verbose $results.attachmentStatus;}
-        $results.Upload = $existingupload ?? $(New-HuduUpload -Uploadable_Id $newDocId -Uploadable_Type 'Article' -FilePath $results.OriginalDoc.FullName)
-        $results.Upload = Unwrap-HuduResultObject -InputObject $results.Upload -WrapperNames @('upload')
+    $originalUploadAlreadyHandled = ($true -eq $results.isPdf -and $null -ne $results.Upload)
+    if (($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) -and -not $originalUploadAlreadyHandled) {
+        $uploadInfo = Ensure-HuduArticleUploadForFile `
+            -ArticleId $newDocId `
+            -FilePath $results.OriginalDoc.FullName `
+            -CalculateHashes $results.CalculateEmbedHashes `
+            -SourceLastModifiedUtc $results.SourceLastModified `
+            -MatchNames @($results.OriginalDoc.Name, $results.originalName)
+        $results.Upload = $uploadInfo.Upload
+        $results.attachmentStatus = $uploadInfo.Status
+        $results.AttachmentHashInfo = $uploadInfo.HashInfo
+        $results.LocalAttachmentNewer = $uploadInfo.LocalAttachmentNewer
+        $results.RemoteAttachmentUTCdate = $uploadInfo.RemoteAttachmentUTCdate
     }
     if ($false -eq $results.AllowedToConvertFile){
         $uploadUrl = Get-ObjectPropertyValue -InputObject $results.Upload -Names @('url', 'Url', 'file_url', 'public_url')
@@ -2425,6 +2438,106 @@ function Compare-UploadHashWithFile {
         if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
             Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+function Ensure-HuduArticleUploadForFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [int]$ArticleId,
+
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [Alias('path','file','localpath')]
+        [string]$FilePath,
+
+        [bool]$CalculateHashes = $true,
+        [datetime]$SourceLastModifiedUtc,
+        [string[]]$MatchNames = @()
+    )
+
+    if (-not (Get-Variable -Name CurrentHuduVersion -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:CurrentHuduVersion) {
+        $appInfo = Get-HuduAppInfo
+        $script:CurrentHuduVersion = [version]$appInfo.version
+    }
+
+    if (-not (Get-Variable -Name DateCompareJitterHours -Scope Script -ErrorAction SilentlyContinue) -or $null -eq $script:DateCompareJitterHours) {
+        $script:DateCompareJitterHours = [timespan]::FromHours(12)
+    }
+
+    $localFile = Get-Item -LiteralPath $FilePath -ErrorAction Stop
+    if ($SourceLastModifiedUtc -eq [datetime]::MinValue) {
+        $SourceLastModifiedUtc = $localFile.LastWriteTimeUtc
+    }
+
+    $candidateNames = @(
+        @($MatchNames)
+        $localFile.Name
+        [IO.Path]::GetFileNameWithoutExtension($localFile.Name)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $existingUpload = Get-HuduUploads |
+        Where-Object {
+            $_.uploadable_id -eq $ArticleId -and
+            $_.uploadable_type -eq 'Article' -and
+            ((Get-HuduObjectName -InputObject $_) -in $candidateNames)
+        } |
+        Select-Object -First 1
+    $existingUpload = Unwrap-HuduResultObject -InputObject $existingUpload -WrapperNames @('upload')
+
+    $status = $null
+    $hashInfo = $null
+    $remoteAttachmentUtcDate = $null
+    $localAttachmentNewer = $null
+    $replacedUpload = $false
+
+    if ($null -ne $existingUpload) {
+        Write-Verbose "An existing upload (attachment) was found."
+        $existingUploadId = Get-HuduObjectId -InputObject $existingUpload
+
+        if ($script:CurrentHuduVersion -lt [version]("2.41.0") -or $false -eq $CalculateHashes) {
+            $status = "Existing attachment upload found for article, but hash comparison is not available. Using existing attachment/upload as-is."
+            Write-Verbose $status
+        } else {
+            $hashInfo = Compare-UploadHashWithFile -UploadId $existingUploadId -LocalFile $localFile.FullName
+            $existingUploadDate = Get-HuduObjectDateUtc -InputObject $existingUpload
+            if ($existingUploadDate) {
+                $remoteAttachmentUtcDate = $existingUploadDate.Add($script:DateCompareJitterHours)
+                $localAttachmentNewer = $SourceLastModifiedUtc -gt $remoteAttachmentUtcDate
+            } else {
+                $localAttachmentNewer = $true
+            }
+
+            if ($true -eq $hashInfo.SameFile) {
+                $status = "Hashes match, skipping upload or replace"
+                Write-Verbose $status
+            } elseif ($true -eq $localAttachmentNewer) {
+                $status = "Existing attachment upload is older $remoteAttachmentUtcDate and has different hash ($($hashInfo.LocalHash) vs $($hashInfo.UploadHash)). Deleting existing upload to replace with new version."
+                Write-Verbose $status
+                Remove-HuduUpload -Id $existingUploadId -Confirm:$false
+                $existingUpload = $null
+                $replacedUpload = $true
+            } else {
+                $status = "Existing attachment upload appears newest. No need to replace."
+                Write-Verbose $status
+            }
+        }
+    } else {
+        $status = "No existing upload found. Proceeding to upload new file."
+        Write-Verbose $status
+    }
+
+    $upload = $existingUpload ?? $(New-HuduUpload -Uploadable_Id $ArticleId -Uploadable_Type 'Article' -FilePath $localFile.FullName)
+    $upload = Unwrap-HuduResultObject -InputObject $upload -WrapperNames @('upload')
+
+    [pscustomobject]@{
+        Upload                  = $upload
+        Status                  = $status
+        HashInfo                = $hashInfo
+        LocalAttachmentNewer    = $localAttachmentNewer
+        RemoteAttachmentUTCdate = $remoteAttachmentUtcDate
+        ReplacedUpload          = $replacedUpload
     }
 }
 
