@@ -69,6 +69,7 @@ To get the latest CLI, clone or download a zipfile of this repo.
 | **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
 | **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
+| **PdfMigrationStrategy** | PDF conversion mode: `plaintext`, `html`, or `rasterized`. Defaults to `plaintext`. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
 | **MaxDepth** | Maximum recursion depth when using `Recurse`. Default: **5** levels. |
@@ -131,7 +132,7 @@ If you wanted to upload all eligible .pdf documents in c:\path to a single compa
  . .\Files-For-Hudu.ps1 -TargetDocumentDir C:\Path\ -SourceStrategy Recurse -Filter "*.pdf"
 ```
 
-Doing so will use pdftohtml to extract html/images from every found pdf, create a native article from html extracted from pdf, attach and relink images in pdf, then upload original pdf document as an attachment to the article. The extracted HTML is almost indistinguishable from the source pdf and can be edited, searched for, etc.
+By default PDFs use `plaintext`, which runs Poppler `pdftotext` and creates a searchable text article with the original PDF attached. You can also set `-PdfMigrationStrategy html` to use `pdftohtml` and extract HTML/images, or `-PdfMigrationStrategy rasterized` to render every page as a PNG image with `pdftoppm` for maximum visual fidelity.
 
 <img width="1224" height="448" alt="image" src="https://github.com/user-attachments/assets/e1298f57-0e3e-4903-8425-ccbcafd109a7" />
 
@@ -178,7 +179,7 @@ If there is a specific format that you don't like to convert, like xlsx or xlsm,
 
 `UploadAsArticleExtensions` is optional. When populated, matching non-image extensions are forced to upload-only article behavior even if LibreOffice could convert them.
 
-`PlainTextPdfConversion` is optional (default $true), if you set this to false, PDF files will be converted with PDF2HTML (poppler lib). if set to true or not included, these will be converted to plaintext with PDF2TXT (also poppler lib). Since PDF formatting varies wildly between sources and authoring programs, plaintext conversion is generally a bit more reliable. If your PDF files are from a known source that works well with conversion, however, you can opt to set this to $false, which will recreate the article from PDF with raster iamges, vector images, and everything possible. Sometimes, this does not work as expected, but can be fruitful given the quality of PDF files provided.
+`PdfMigrationStrategy` is optional (default `plaintext`). Use `plaintext` for Poppler `pdftotext`, `html` for Poppler `pdftohtml`, or `rasterized` for Poppler `pdftoppm` page images. `PlainTextPdfConversion` remains supported for older callers: `$true` maps to `plaintext`, and `$false` maps to `html` when `PdfMigrationStrategy` is omitted.
 
 ## Community & Socials
 

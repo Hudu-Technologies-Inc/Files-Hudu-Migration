@@ -42,6 +42,11 @@ param(
     [Parameter(Mandatory = $false)]
     [bool]$PlainTextPdfConversion = $true,
 
+    [Parameter(Mandatory = $false)]
+    [AllowEmptyString()]
+    [ValidateSet('','plaintext','html','rasterized')]
+    [string]$PdfMigrationStrategy = '',
+
     # Max number of items to process in one run (files + dirs, filtered)
     [Parameter(Mandatory = $false)]
     [int]$MaxItems = 500,
@@ -83,6 +88,11 @@ param(
     $requestedUploadAsArticleExtensions = @($UploadAsArticleExtensions)
     $ConvertExtensions = $null
     $UploadAsArticleExtensions = $null
+    $effectivePdfMigrationStrategy = if ([string]::IsNullOrWhiteSpace($PdfMigrationStrategy)) {
+        if ($PlainTextPdfConversion) { 'plaintext' } else { 'html' }
+    } else {
+        $PdfMigrationStrategy
+    }
 
     $defaultEmbeddableImageExtensions = @(".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".apng", ".avif",".ico",".jfif",".pjpeg",".pjp")
     $defaultDisallowedForConvert = [System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".heic", ".eml", ".msg", ".esx", ".esxm")
@@ -205,6 +215,7 @@ param(
                 ResourceLocation = (Get-Item -LiteralPath $sourceObject.FullName)
                 IncludeOriginals = ($IncludeOriginals ?? $true)
                 PlainTextPdfConversion = ($PlainTextPdfConversion ?? $true)
+                PdfMigrationStrategy = $effectivePdfMigrationStrategy
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null
