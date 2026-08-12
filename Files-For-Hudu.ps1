@@ -188,6 +188,7 @@ param(
     $currentVersionResult = Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey
     [version]$script:CurrentHuduVersion = [version]("$($currentVersionResult | Select-Object -Last 1)")
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
+    try {$migrationRecord = Set-MigrationRecord} catch {}
     Write-Host "LibreOffice path: $sofficePath" -ForegroundColor DarkGray
 
 
