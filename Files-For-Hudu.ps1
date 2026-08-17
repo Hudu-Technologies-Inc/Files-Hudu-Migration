@@ -186,6 +186,8 @@ param(
     # initialize
     Get-PSVersionCompatible
     $currentVersionResult = Set-HuduModuleInitialized -HuduBaseURL $HuduBaseUrl -HuduAPIKey $HuduApiKey
+    $DisallowedVersions = @([version]("2.37.0"), [version]("2.44.3")); if ($DisallowedVersions -contains [version]($currentVersionResult)) {write-host "disallowed version $($currentVersionResult); Please upgrade or downgrade if possible first." -ForegroundColor Red; exit 1;} else {write-host "$($currentVersionResult) is allowed!" -ForegroundColor Green};
+
     [version]$script:CurrentHuduVersion = [version]("$($currentVersionResult | Select-Object -Last 1)")
     $sofficePath = Get-LibreMSI -TmpFolder $DocConversionTempDir
     try {$migrationRecord = Set-MigrationRecord} catch {}
