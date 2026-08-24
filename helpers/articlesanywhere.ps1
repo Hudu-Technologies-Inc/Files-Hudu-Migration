@@ -38,7 +38,7 @@ function Get-ObjectPropertyValue {
 function Unwrap-HuduResultObject {
   param(
     [object]$InputObject,
-    [string[]]$WrapperNames = @('company', 'article', 'upload', 'HuduArticle')
+    [string[]]$WrapperNames = @('company', 'article', 'upload', 'public_photo', 'PublicPhoto', 'HuduArticle')
   )
   $current = $InputObject
   foreach ($wrapperName in $WrapperNames) {
@@ -51,17 +51,97 @@ function Unwrap-HuduResultObject {
 }
 function Get-HuduObjectName {
   param([object]$InputObject)
-  return Get-ObjectPropertyValue -InputObject $InputObject -Names @('name', 'Name')
+  return Get-ObjectPropertyValue -InputObject $InputObject -Names @('name', 'Name', 'file_name', 'fileName', 'FileName')
 }
 function Get-HuduObjectId {
   param([object]$InputObject)
   return Get-ObjectPropertyValue -InputObject $InputObject -Names @('id', 'Id')
 }
-function New-DocImageMap([object[]]$HuduImages) {
+function Get-HuduPublicPhotoDownloadId {
+  param([object]$InputObject)
+  $numericId = Get-ObjectPropertyValue -InputObject $InputObject -Names @('numeric_id', 'numericId', 'NumericId')
+  if ($numericId) { return $numericId }
+  return Get-HuduObjectId -InputObject $InputObject
+}
+function Test-HuduPublicPhotoRasterImage {
+  param([Parameter(Mandatory)][string]$Path)
+  $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+  return ($extension -in @('.gif', '.png', '.jpeg', '.jpg'))
+}
+function Test-HuduObjectArticleAssociation {
+  param(
+    [object]$InputObject,
+    [Parameter(Mandatory)][int]$ArticleId,
+    [Parameter(Mandatory)][ValidateSet('Upload','PublicPhoto')][string]$MediaKind
+  )
+
+  if ($MediaKind -eq 'Upload') {
+    return (
+      (Get-ObjectPropertyValue -InputObject $InputObject -Names @('uploadable_type', 'uploadableType', 'UploadableType')) -eq 'Article' -and
+      (Get-ObjectPropertyValue -InputObject $InputObject -Names @('uploadable_id', 'uploadableId', 'UploadableId')) -eq $ArticleId
+    )
+  }
+
+  return (
+    (Get-ObjectPropertyValue -InputObject $InputObject -Names @('record_type', 'recordType', 'RecordType')) -eq 'Article' -and
+    (Get-ObjectPropertyValue -InputObject $InputObject -Names @('record_id', 'recordId', 'RecordId')) -eq $ArticleId
+  )
+}
+function Convert-HuduMediaUrlToRelative {
+  param(
+    [AllowNull()][string]$Url,
+    [AllowNull()][string]$HuduBaseUrl
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Url)) { return $Url }
+  $trimmedUrl = $Url.Trim()
+  if ($trimmedUrl.StartsWith('/')) { return $trimmedUrl }
+  if ($trimmedUrl -notmatch '^(?i)https?://') { return $trimmedUrl }
+
+  try {
+    $uri = [uri]$trimmedUrl
+  } catch {
+    return $trimmedUrl
+  }
+
+  $baseHosts = @()
+  foreach ($candidateBase in @($HuduBaseUrl, $script:Int_HuduBaseURL, $script:hudubaseurl, $hudubaseurl)) {
+    if ([string]::IsNullOrWhiteSpace([string]$candidateBase)) { continue }
+    try {
+      $baseHosts += ([uri]$candidateBase).Host
+    } catch {}
+  }
+  try {
+    if (Get-Command -Name Get-HuduBaseURL -ErrorAction SilentlyContinue) {
+      $moduleBaseUrl = Get-HuduBaseURL
+      if (-not [string]::IsNullOrWhiteSpace([string]$moduleBaseUrl)) {
+        $baseHosts += ([uri]$moduleBaseUrl).Host
+      }
+    }
+  } catch {}
+  $baseHosts = @($baseHosts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)
+
+  $isHuduHost = ($baseHosts.Count -eq 0 -and $uri.AbsolutePath -match '^/(file|public_photo)/') -or ($uri.Host -in $baseHosts)
+  if ($isHuduHost -and $uri.AbsolutePath -match '^/(file|public_photo)/') {
+    return $uri.PathAndQuery
+  }
+
+  return $trimmedUrl
+}
+function New-DocImageMap {
+  param(
+    [object[]]$HuduImages,
+    [string]$HuduBaseUrl
+  )
   $map = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
   foreach ($h in $HuduImages) {
     $orig = [string]$h.OriginalFilename
     $url  = $h.UsingImage.url ?? $h.UsingImage.public_url ?? $h.UsingImage.file_url ?? $h.UsingImage.cdn_url
+    if (-not $url -and $h.MediaKind -eq 'PublicPhoto') {
+      $publicPhotoId = Get-HuduObjectId -InputObject $h.UsingImage
+      if ($publicPhotoId) { $url = "/public_photo/$publicPhotoId" }
+    }
+    $url = Convert-HuduMediaUrlToRelative -Url $url -HuduBaseUrl $HuduBaseUrl
     if (-not $orig -or -not $url) { continue }
     $leaf = Split-Path -Leaf $orig
     $base = [IO.Path]::GetFileNameWithoutExtension($leaf)
@@ -204,30 +284,83 @@ function Set-HuduArticleFromHtml {
     throw "Could not match or create article: '$Title' (Company: '$CompanyName')"
   }
 
-  # 2) Idempotent uploads (company-scoped if company present; else global KB)
-  $existingRelatedImages = Get-HuduUploads | Where-Object { $_.uploadable_type -eq 'Article' -and $_.uploadable_id -eq $articleUsedId }
+  # 2) Idempotent article-local media. Public photos are used for raster article embeds.
+  $existingRelatedUploads = Get-HuduUploads | Where-Object { Test-HuduObjectArticleAssociation -InputObject $_ -ArticleId $articleUsedId -MediaKind Upload }
+  $existingRelatedPublicPhotos = @()
+  if (@($ImagesArray | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) -and (Test-HuduPublicPhotoRasterImage -Path $_) }).Count -gt 0) {
+    if (-not (Get-Command -Name Get-HuduPublicPhotos -ErrorAction SilentlyContinue) -or -not (Get-Command -Name New-HuduPublicPhoto -ErrorAction SilentlyContinue)) {
+      throw "Raster article images require HuduAPI public photo cmdlets: Get-HuduPublicPhotos and New-HuduPublicPhoto."
+    }
+    $existingRelatedPublicPhotos = @(Get-HuduPublicPhotos | Where-Object { Test-HuduObjectArticleAssociation -InputObject $_ -ArticleId $articleUsedId -MediaKind PublicPhoto })
+  }
 
   $ImagesArray = @(@($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
   Write-Verbose "Processing $($ImagesArray.Count) images for article '$Title'..."
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
-    $existingUpload = $null; $uploaded = $null; $comparision = $null; $existingUploadModifiedDate = $null;
+    $existingUpload = $null; $uploaded = $null; $existingPublicPhoto = $null; $uploadedPublicPhoto = $null; $comparison = $null; $existingUploadModifiedDate = $null;
     $imageFileName = ([IO.Path]::GetFileName($ImageFile)).Trim()
     $imageMetadata = Get-Item -LiteralPath $ImageFile -ErrorAction silentlycontinue
+    $usePublicPhoto = Test-HuduPublicPhotoRasterImage -Path $ImageFile
 
-    $existingUpload = $existingRelatedImages | Where-Object { (Get-HuduObjectName -InputObject $_) -eq $imageFileName } | Select-Object -First 1
+    if ($usePublicPhoto) {
+      $publicPhotoCandidates = @($existingRelatedPublicPhotos | Where-Object { (Get-HuduObjectName -InputObject $_) -eq $imageFileName })
+      if ($publicPhotoCandidates.Count -eq 0) {
+        $publicPhotoCandidates = @($existingRelatedPublicPhotos | Where-Object { Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $imageFileName })
+      }
+
+      if ($true -eq $CalculateHashes) {
+        foreach ($candidate in $publicPhotoCandidates) {
+          $candidate = Unwrap-HuduResultObject -InputObject $candidate -WrapperNames @('public_photo', 'PublicPhoto')
+          $publicPhotoDownloadId = Get-HuduPublicPhotoDownloadId -InputObject $candidate
+          if (-not $publicPhotoDownloadId) { continue }
+          try {
+            $comparison = Compare-PublicPhotoHashWithFile -PublicPhotoId $publicPhotoDownloadId -LocalFile $ImageFile
+            if ($true -eq $comparison.SameFile) {
+              $existingPublicPhoto = $candidate
+              $embedInfo += "Existing article public photo '$(Get-HuduObjectName -InputObject $candidate)' with id $(Get-HuduObjectId -InputObject $candidate) matches file '$ImageFile' by hash. Reusing current-article public photo."; Write-Verbose $embedInfo[-1];
+              break
+            }
+          } catch {
+            Write-Warning "Could not compare existing public photo hash for '$imageFileName': $($_.Exception.Message)"
+          }
+        }
+      } else {
+        $existingPublicPhoto = Unwrap-HuduResultObject -InputObject ($publicPhotoCandidates | Select-Object -First 1) -WrapperNames @('public_photo', 'PublicPhoto')
+      }
+
+      if (-not $existingPublicPhoto) {
+        if ($publicPhotoCandidates.Count -gt 0 -and $true -eq $CalculateHashes) {
+          $embedInfo += "Found same-article public photo candidate(s) for '$imageFileName', but none matched the local hash. Creating a new public photo for this article."; Write-Verbose $embedInfo[-1];
+        }
+        $uploadedPublicPhoto = New-HuduPublicPhoto -FilePath $ImageFile -RecordType 'Article' -RecordId $articleUsedId
+        $uploadedPublicPhoto = Unwrap-HuduResultObject -InputObject $uploadedPublicPhoto -WrapperNames @('public_photo', 'PublicPhoto')
+        if ($uploadedPublicPhoto) {
+          $existingRelatedPublicPhotos += $uploadedPublicPhoto
+        }
+      }
+
+      $usingImage = $existingPublicPhoto ?? $uploadedPublicPhoto
+      if ($usingImage) {
+        $HuduImages += @{ OriginalFilename = $ImageFile; UsingImage = $usingImage; MediaKind = 'PublicPhoto' }
+      }
+      continue
+    }
+
+    $existingUpload = $existingRelatedUploads | Where-Object { (Get-HuduObjectName -InputObject $_) -eq $imageFileName } | Select-Object -First 1
     if (-not $existingUpload) {
-      $existingUpload = $existingRelatedImages | Where-Object { Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $imageFileName } | Select-Object -First 1
+      $existingUpload = $existingRelatedUploads | Where-Object { Test-Equiv -A (Get-HuduObjectName -InputObject $_) -B $imageFileName } | Select-Object -First 1
     }
     $existingUpload = Unwrap-HuduResultObject -InputObject $existingUpload -WrapperNames @('upload')
     $existingUploadId = Get-HuduObjectId -InputObject $existingUpload
     $existingUploadName = Get-HuduObjectName -InputObject $existingUpload
     if ($null -ne $existingUpload -and $true -eq $CalculateHashes -and $existingUploadId -gt 0) {
       $comparison = Compare-UploadHashWithFile -UploadID $existingUploadId -LocalFile $ImageFile
-      $existingUploadModifiedDate = ([datetime]::Parse(($existingUpload.created_date ?? $existingUpload.created_at))).ToUniversalTime()
+      $existingUploadDate = Get-HuduObjectDateUtc -InputObject $existingUpload
+      $existingUploadModifiedDate = $existingUploadDate ?? [datetime]::MinValue
       if ($true -eq $comparison.SameFile) {
-        $embedInfo += "Existing embed '$existingUploadName' with id $existingUploadId matches file '$ImageFile' by hash. Reusing existing upload."; Write-Verbose $embedInfo[-1];
+        $embedInfo += "Existing embed '$existingUploadName' with id $existingUploadId matches file '$ImageFile' by hash. Reusing current-article upload."; Write-Verbose $embedInfo[-1];
       } else {
         $embedInfo += "Local file hash: $($comparison.LocalHash) is not the same as remote file hash $($comparison.UploadHash)"; Write-Verbose $embedInfo[-1];
         if ($imagemetadata.LastWriteTimeUtc -gt $existingUploadModifiedDate.Add($script:DateCompareJitterHours)) {
@@ -245,11 +378,14 @@ function Set-HuduArticleFromHtml {
     if (-not $existingUpload) {
         $uploaded = New-HuduUpload -FilePath $ImageFile -Uploadable_Type 'Article' -Uploadable_Id $articleUsedId
         $uploaded = Unwrap-HuduResultObject -InputObject $uploaded -WrapperNames @('upload')
+        if ($uploaded) {
+          $existingRelatedUploads += $uploaded
+        }
     }
 
     $usingImage = $existingUpload ?? $uploaded
     if ($usingImage) {
-      $HuduImages += @{ OriginalFilename = $ImageFile; UsingImage = $usingImage }
+      $HuduImages += @{ OriginalFilename = $ImageFile; UsingImage = $usingImage; MediaKind = 'Upload' }
     }
   }
 
@@ -257,7 +393,7 @@ function Set-HuduArticleFromHtml {
 
 
   # 4) Build maps for rewriting
-  $imageMap   = New-DocImageMap -HuduImages $HuduImages
+  $imageMap   = New-DocImageMap -HuduImages $HuduImages -HuduBaseUrl $HuduBaseUrl
 
 
   $articleUsed = Unwrap-HuduResultObject -InputObject $articleUsed -WrapperNames @('article')
@@ -275,7 +411,8 @@ function Set-HuduArticleFromHtml {
   $ImageResolver = {
     param([string]$src, [hashtable]$ctx)
     if ([string]::IsNullOrWhiteSpace($src)) { return $null }
-    if ($src -match '^(?i)(https?:|data:)') { return $src }
+    if ($src -match '^(?i)data:') { return $src }
+    if ($src -match '^(?i)https?:') { return Convert-HuduMediaUrlToRelative -Url $src -HuduBaseUrl $ctx.HuduBaseUrl }
     $raw = ($src -split '#')[0].Split('?')[0]
     $dec = [System.Web.HttpUtility]::UrlDecode($raw)
     if ($dec -match '^(?i)file:///') { $dec = $dec -replace '^file:///', '' -replace '/', '\' }
@@ -290,7 +427,7 @@ function Set-HuduArticleFromHtml {
   $LinkResolver = {
     param([string]$href, [hashtable]$ctx)
     if ([string]::IsNullOrWhiteSpace($href)) { return $null }
-    if ($href -match '^(?i)https?:') { return $href }
+    if ($href -match '^(?i)https?:') { return Convert-HuduMediaUrlToRelative -Url $href -HuduBaseUrl $ctx.HuduBaseUrl }
     if ($href.StartsWith('#')) { return $null }
     $raw  = $href.Split('#')[0].Split('?')[0]
     $leaf = Split-Path -Leaf ([System.Web.HttpUtility]::UrlDecode($raw))
@@ -302,7 +439,7 @@ function Set-HuduArticleFromHtml {
     return $null
   }
 
-  $ctx = @{ ImageMap = $imageMap; ArticleMap = $articleMap }
+  $ctx = @{ ImageMap = $imageMap; ArticleMap = $articleMap; HuduBaseUrl = $HuduBaseUrl }
   $r = Rewrite-DocLinks -Html $HtmlContents -ImageResolver $ImageResolver -LinkResolver $LinkResolver -Context $ctx
   $articleUpdateParams = @{
     Id = $articleUsedId
@@ -1737,6 +1874,7 @@ function New-HuduArticleFromLocalResource {
     }
     if ($false -eq $results.AllowedToConvertFile){
         $uploadUrl = Get-ObjectPropertyValue -InputObject $results.Upload -Names @('url', 'Url', 'file_url', 'public_url')
+        $uploadUrl = Convert-HuduMediaUrlToRelative -Url $uploadUrl -HuduBaseUrl $HuduBaseUrl
         $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
             Set-HuduArticle -id $newDocId -content "<h2>$($results.OriginalDoc.Name)</h2><br><a href='$uploadUrl'>See Attached Document, $($results.OriginalDoc.Name)</a> $(Get-MetadataArticleBlock -filePath $results.OriginalDoc.FullName)"
         } else {
@@ -2502,6 +2640,58 @@ $(Get-MetadataArticleBlock -filePath $file.FullName)
     return $html
 }
 
+function Compare-HuduRemoteFileHashWithFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$RemoteId,
+
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [Alias('path','file','localpath','filepath')]
+        [string]$LocalFile,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Upload','PublicPhoto')]
+        [string]$MediaKind
+    )
+
+    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid())))
+
+    try {
+        $remoteEntry = if ($MediaKind -eq 'PublicPhoto') {
+            Get-HuduPublicPhotos -Download -Id $RemoteId -OutDir $tempDir
+        } else {
+            Get-HuduUploads -Download -Id ([int]$RemoteId) -OutDir $tempDir
+        }
+        $remoteEntry = Unwrap-HuduResultObject -InputObject $remoteEntry -WrapperNames @('Upload', 'upload', 'public_photo', 'PublicPhoto')
+        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path $LocalFile).Path       -Algorithm SHA256).Hash
+        $remoteLocalPath = Get-ObjectPropertyValue -InputObject $remoteEntry -Names @('LocalPath', 'local_path', 'localPath')
+        if ([string]::isnullorempty($remoteLocalPath) -or [string]::isnullorempty($localHash)){
+            return @{SameFile = $false; LocalHash = $localHash; RemoteHash = $null; UploadHash = $null }
+        }
+
+        $remoteHash = (Get-FileHash -LiteralPath (Resolve-Path $remoteLocalPath).Path -Algorithm SHA256).Hash
+        $samefile = [bool]$("$remoteHash" -ieq "$localHash")
+        if ($false -eq $samefile) {
+            write-verbose "Hash mismatch between local file and existing $MediaKind (RemoteId: $RemoteId). Local: $localHash, Remote: $remoteHash"
+        }
+
+
+        @{
+            SameFile   = $samefile
+            RemoteHash = $remoteHash
+            UploadHash = $remoteHash
+            LocalHash  = $localHash
+        }
+    }
+    finally {
+        if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
+            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Compare-UploadHashWithFile {
     [CmdletBinding()]
     param(
@@ -2514,35 +2704,22 @@ function Compare-UploadHashWithFile {
         [string]$LocalFile
     )
 
-    $tempDir = (Get-EnsuredPath -Path (Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid())))
+    Compare-HuduRemoteFileHashWithFile -MediaKind Upload -RemoteId $UploadId -LocalFile $LocalFile
+}
 
-    try {
-        $uploadEntry = Get-HuduUploads -Download -Id $UploadId -OutDir $tempDir
-        $uploadEntry = Unwrap-HuduResultObject -InputObject $uploadEntry -WrapperNames @('Upload', 'upload')
-        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path $LocalFile).Path       -Algorithm SHA256).Hash
-        $uploadLocalPath = Get-ObjectPropertyValue -InputObject $uploadEntry -Names @('LocalPath', 'local_path', 'localPath')
-        if ([string]::isnullorempty($uploadLocalPath) -or [string]::isnullorempty($localHash)){
-            return @{SameFile = $false; LocalHash = $localHash; uploadHash = $null }
-        }
+function Compare-PublicPhotoHashWithFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$PublicPhotoId,
 
-        $uploadHash = (Get-FileHash -LiteralPath (Resolve-Path $uploadLocalPath).Path -Algorithm SHA256).Hash
-        $samefile = [bool]$("$uploadHash" -ieq "$localHash")
-        if ($false -eq $samefile) {
-            write-verbose "Hash mismatch between local file and existing upload (UploadId: $UploadId). Local: $localHash, Upload: $uploadHash"
-        }
+        [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [Alias('path','file','localpath','filepath')]
+        [string]$LocalFile
+    )
 
-
-        @{
-            SameFile   = $samefile
-            UploadHash = $uploadHash
-            LocalHash  = $localHash
-        }
-    }
-    finally {
-        if ($tempDir -and (Test-Path -LiteralPath $tempDir)) {
-            Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Compare-HuduRemoteFileHashWithFile -MediaKind PublicPhoto -RemoteId $PublicPhotoId -LocalFile $LocalFile
 }
 
 function Ensure-HuduArticleUploadForFile {
