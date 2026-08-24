@@ -68,6 +68,34 @@ function Test-HuduPublicPhotoRasterImage {
   $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
   return ($extension -in @('.gif', '.png', '.jpeg', '.jpg'))
 }
+function Get-HuduEmbeddableUploadMediaKind {
+  param([Parameter(Mandatory)][string]$Path)
+  $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+  if ($extension -in @('.mp4', '.m4v', '.webm', '.ogv', '.mov', '.mkv')) { return 'Video' }
+  if ($extension -in @('.mp3', '.m4a', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac', '.weba')) { return 'Audio' }
+  return $null
+}
+function Test-HuduEmbeddableUploadMediaFile {
+  param([Parameter(Mandatory)][string]$Path)
+  return -not [string]::IsNullOrWhiteSpace((Get-HuduEmbeddableUploadMediaKind -Path $Path))
+}
+function Get-HuduEmbedHtmlForLocalMedia {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$Title
+  )
+
+  $kind = Get-HuduEmbeddableUploadMediaKind -Path $Path
+  if ([string]::IsNullOrWhiteSpace($kind)) { return $null }
+
+  $leaf = [System.Net.WebUtility]::HtmlEncode([IO.Path]::GetFileName($Path))
+  $encodedTitle = [System.Net.WebUtility]::HtmlEncode($Title)
+  if ($kind -eq 'Video') {
+    return "<video src='$leaf' controls='controls' width='640'>$encodedTitle</video>"
+  }
+
+  return "<audio src='$leaf' controls='controls'>$encodedTitle</audio>"
+}
 function Test-HuduObjectArticleAssociation {
   param(
     [object]$InputObject,
@@ -217,7 +245,7 @@ function Rewrite-DocLinks {
 function Set-HuduArticleFromHtml {
   [CmdletBinding()]
   param(
-    [string[]]$ImagesArray = @(),   # flat list of absolute image paths
+    [string[]]$ImagesArray = @(),   # flat list of absolute local media paths referenced by the HTML
     [string]$CompanyName = "",                     # optional → global KB if ''
     [Parameter(Mandatory)][string]$Title,
     [Parameter(Mandatory)][string]$HtmlContents,
@@ -295,7 +323,7 @@ function Set-HuduArticleFromHtml {
   }
 
   $ImagesArray = @(@($ImagesArray) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
-  Write-Verbose "Processing $($ImagesArray.Count) images for article '$Title'..."
+  Write-Verbose "Processing $($ImagesArray.Count) embedded media files for article '$Title'..."
   $HuduImages = @()
   foreach ($ImageFile in $ImagesArray) {
     if (-not (Test-Path -LiteralPath $ImageFile -PathType Leaf)) { continue }
@@ -1500,7 +1528,7 @@ function New-HuduArticleFromLocalResource {
     $MatchedDocs = $null; $exactMatch = $null;
     $results = [pscustomobject]@{
         RequestParams = @{DisallowedForConvert=$DisallowedForConvert; EmbeddableImageExtensions = $EmbeddableImageExtensions; includeOriginals=$includeOriginals; updateOnMatch=$updateOnMatch; companyName=$companyName; UpdateStrategy = $UpdateStrategy; MaxHtmlCharacters = $MaxHtmlCharacters; PlainTextPdfConversion = $PlainTextPdfConversion; PdfMigrationStrategy = $PdfMigrationStrategy;}
-        Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; HtmlCharacterCount = $null; isScript =$null;
+        Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; IsEmbedUploadMedia = $null; EmbedUploadMediaKind = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; HtmlCharacterCount = $null; isScript =$null;
         attachmentStatus = "No attachment info yet."; AttachmentHashInfo = $null; LocalAttachmentNewer = $null; RemoteAttachmentUTCdate = $null; ContentHashInfo = $null; ContentHash = $null; RemoteContentHash = $null; LocalContentNewer = $null; RemoteArticleUTCdate = $null;
         NewDoc = $null; OriginalDoc = $null; Upload = $null; CalculateEmbedHashes = ([bool]($script:CurrentHuduVersion -ge [version]("2.41.0")))
     }
@@ -1547,6 +1575,8 @@ function New-HuduArticleFromLocalResource {
     $results.AllowedToConvertFile = -not ($DisallowedForConvert -contains $results.originalExt)
     $results.isPdf        = ($results.originalExt -eq '.pdf')
     $results.isImage      = ($results.originalExt -in $EmbeddableImageExtensions)
+    $results.EmbedUploadMediaKind = Get-HuduEmbeddableUploadMediaKind -Path $results.OriginalDoc.FullName
+    $results.IsEmbedUploadMedia = -not [string]::IsNullOrWhiteSpace($results.EmbedUploadMediaKind)
     $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
     $results.FileHash     = "$($(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash)"
 
@@ -1556,6 +1586,7 @@ function New-HuduArticleFromLocalResource {
         $currentPolicyCreatesArticleContent = (
             $true -eq $results.isPdf -or
             $true -eq $results.isImage -or
+            $true -eq $results.IsEmbedUploadMedia -or
             $true -eq $results.isScript -or
             $true -eq $results.AllowedToConvertFile
         )
@@ -1762,6 +1793,13 @@ function New-HuduArticleFromLocalResource {
     } elseif ($true -eq $results.isImage) {
         $results.Strategy = "Processing as single-informatic image, to be embedded in Article"; Write-Info -Message $results.Strategy
         $results.NewDoc = $(Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $targetCompanyName }) -HtmlContents "<img src='$($results.OriginalDoc.Name)' alt='$results.originalName' />")
+    } elseif ($true -eq $results.IsEmbedUploadMedia) {
+        $results.Strategy = "Processing as single $($results.EmbedUploadMediaKind.ToLowerInvariant()) file, to be embedded in Article"; Write-Info -Message $results.Strategy
+        $mediaHtml = Get-HuduEmbedHtmlForLocalMedia -Path $results.OriginalDoc.FullName -Title $results.originalName
+        if (-not (Test-GeneratedContentUpdate -Content $mediaHtml -ContentKind "$($results.EmbedUploadMediaKind.ToLowerInvariant()) embed")) {
+            return $results
+        }
+        $results.NewDoc = Set-HuduArticleFromHtml -ImagesArray @($results.OriginalDoc.FullName) -Title $results.originalName -CompanyName $(if ($results.IsGlobalKB) { '' } else { $targetCompanyName }) -HtmlContents $mediaHtml -CalculateHashes $results.CalculateEmbedHashes
     }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
@@ -1823,8 +1861,8 @@ function New-HuduArticleFromLocalResource {
                         }
                     }
                 } else {
-                    $results.Images = @(Get-ChildItem -LiteralPath $results.outputDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' } | Select-Object -ExpandProperty FullName)
-                    $results.LoggedMessages += "$($results.Images.Count) images extracted during conversion."
+                    $results.Images = @(Get-ChildItem -LiteralPath $results.outputDir -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '^\.(png|jpg|jpeg|gif|bmp|tif|tiff)$' -or (Test-HuduEmbeddableUploadMediaFile -Path $_.FullName) } | Select-Object -ExpandProperty FullName)
+                    $results.LoggedMessages += "$($results.Images.Count) embedded media files extracted during conversion."
                     if (-not (Test-GeneratedContentUpdate -Content $htmlContents -ContentKind 'converted HTML')) {
                         return $results
                     }
@@ -1858,7 +1896,7 @@ function New-HuduArticleFromLocalResource {
     }
 
     # process uploads if required
-    $originalUploadAlreadyHandled = ($true -eq $results.isPdf -and $null -ne $results.Upload)
+    $originalUploadAlreadyHandled = (($true -eq $results.isPdf -and $null -ne $results.Upload) -or $true -eq $results.IsEmbedUploadMedia)
     if (($true -eq $includeOriginals -or $true -eq $results.isScript -or $false -eq $results.AllowedToConvertFile) -and -not $originalUploadAlreadyHandled) {
         $uploadInfo = Ensure-HuduArticleUploadForFile `
             -ArticleId $newDocId `
@@ -1872,7 +1910,7 @@ function New-HuduArticleFromLocalResource {
         $results.LocalAttachmentNewer = $uploadInfo.LocalAttachmentNewer
         $results.RemoteAttachmentUTCdate = $uploadInfo.RemoteAttachmentUTCdate
     }
-    if ($false -eq $results.AllowedToConvertFile){
+    if ($false -eq $results.AllowedToConvertFile -and $true -ne $results.IsEmbedUploadMedia){
         $uploadUrl = Get-ObjectPropertyValue -InputObject $results.Upload -Names @('url', 'Url', 'file_url', 'public_url')
         $uploadUrl = Convert-HuduMediaUrlToRelative -Url $uploadUrl -HuduBaseUrl $HuduBaseUrl
         $results.NewDoc = if ($true -eq $results.IsGlobalKB) {
