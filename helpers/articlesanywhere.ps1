@@ -1508,7 +1508,7 @@ function New-HuduArticleFromLocalResource {
     [AllowEmptyString()]
     [ValidateSet('','plaintext','html','rasterized')]
     [string]$PdfMigrationStrategy = '',
-    [int]$MaxHtmlCharacters=192000,
+    [int]$MaxHtmlCharacters=254000,
     [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
     [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc",".rdp",".pjpg",".pfile",".ptxt",".ppt",".pptx", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm",".pdf", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
