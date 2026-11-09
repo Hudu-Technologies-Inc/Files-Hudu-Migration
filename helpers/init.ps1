@@ -243,7 +243,7 @@ function Set-HuduModuleInitialized {
             [string]$HuduApiZipUrl = $env:HUDUAPI_ZIP_URL,
             [string]$BundledHuduApiZipPath = (
                 Join-Path (
-                    $(if ($PSScriptRoot) { $PSScriptRoot } else { (Resolve-Path .).Path })
+                    $(if ($PSScriptRoot) { Split-Path -Path $PSScriptRoot -Parent } else { (Resolve-Path .).Path })
                 ) 'HAPI.zip'
             ),
             [string]$HuduBaseURL,
@@ -501,7 +501,7 @@ function Set-HuduModuleInitialized {
 
     if ([string]::IsNullOrWhiteSpace($BundledHuduApiZipPath) -and -not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
         $repoRoot = Split-Path -Path $PSScriptRoot -Parent
-        $BundledHuduApiZipPath = Join-Path $repoRoot "ExternalModules\HuduAPI.zip"
+        $BundledHuduApiZipPath = Join-Path $repoRoot 'HAPI.zip'
     }
 
     if ($true -eq $use_hudu_fork) {
