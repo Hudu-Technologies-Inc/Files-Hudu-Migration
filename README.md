@@ -69,7 +69,7 @@ To get the latest CLI, clone or download a zipfile of this repo.
 | **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
 | **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
-| **StandaloneImagesAsPhotos** | Send standalone JPEG, PNG, GIF, WebP and HEIC files to Hudu Photos instead of image articles. Other formats retain existing handling. Default: **false**. |
+| **StandaloneImagesAsPhotos** | Send standalone JPEG, PNG, GIF, WebP and HEIC files to Hudu Photos instead of image articles. Set to `false` to create image articles. Other formats retain existing handling. Default: **true**. |
 | **IncludePdfPagePhotos** | Also publish PDFtoPPM page images to Photos when `PdfMigrationStrategy` is `rasterized`, retaining the PDF article and its embedded pages. Independent of `StandaloneImagesAsPhotos` and `IncludeOriginals`. Default: **false**. |
 | **PdfMigrationStrategy** | PDF conversion mode: `plaintext`, `html`, or `rasterized`. Defaults to `plaintext`. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
@@ -88,13 +88,13 @@ For `ConvertExtensions` and `UploadAsArticleExtensions`, non-empty script parame
 
 Before each call to `New-HuduArticleFromLocalResource`, the main script resolves these preferences into effective `DisallowedForConvert` and `EmbeddableImageExtensions` values for that file. Explicit `UploadAsArticleExtensions` has highest priority. Explicit `ConvertExtensions` is next and can allow an extension even when config-level upload or deny preferences would otherwise block it. Config-level `UploadAsArticleExtensions`, config-level `ConvertExtensions`, and then `DisallowedForConvert` apply after that.
 
-File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Images listed in `EmbeddableImageExtensions` are embedded in articles. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
+File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Supported standalone images go to Photos by default. When `StandaloneImagesAsPhotos` is `false`, or the image format is unsupported by Photos, images listed in `EmbeddableImageExtensions` are embedded in articles. These image extensions are automatically included in the effective conversion allow-list even when `ConvertExtensions` lists only document types. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
 
 Extension lists are normalized before use: values are lowercased, leading dots are added when missing, blank values are ignored, and duplicates are removed.
 
 ### Optional Photos destinations
 
-The GUI exposes both Photos options as checkboxes and includes them in saved settings, the run summary, and the generated PowerShell launcher. Existing saved settings default both options to off. The CLI also supports them directly:
+The GUI exposes both Photos options as checkboxes and includes them in saved settings, the run summary, and the generated PowerShell launcher. Standalone image Photos is on by default; PDF page Photos remains off. Saved choices are respected, including an explicit off value; settings missing the standalone Photos option use the new default. Uncheck **Add standalone pictures to Hudu Photos**, or set `-StandaloneImagesAsPhotos $false`, to create image articles instead. The CLI also supports them directly:
 
 ```powershell
 .\Files-For-Hudu.ps1 -TargetDocumentDir 'N:\DCIM' -SourceStrategy Recurse `
@@ -139,7 +139,7 @@ Hudu photo metadata updates cannot replace image bytes. A replacement creates an
 
 #### Adding Articles for Critical PNG images on a Digital Camera
 ```powershell
-. .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
+. .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png" -StandaloneImagesAsPhotos $false
 ```
 
 ---

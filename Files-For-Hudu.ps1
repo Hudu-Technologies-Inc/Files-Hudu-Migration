@@ -40,7 +40,7 @@ param(
     [bool]$IncludeOriginals = $true,
 
     [Parameter(Mandatory = $false)]
-    [bool]$StandaloneImagesAsPhotos = $false,
+    [bool]$StandaloneImagesAsPhotos = $true,
 
     [Parameter(Mandatory = $false)]
     [bool]$IncludePdfPagePhotos = $false,

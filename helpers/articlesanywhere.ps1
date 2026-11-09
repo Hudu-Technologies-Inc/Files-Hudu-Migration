@@ -1527,7 +1527,7 @@ function New-HuduArticleFromLocalResource {
     [bool]$updateOnMatch=$true,
     [ValidateSet('date','filehash','none')][string]$UpdateStrategy='filehash',
     [bool]$includeOriginals=$true,
-    [bool]$StandaloneImagesAsPhotos=$false,
+    [bool]$StandaloneImagesAsPhotos=$true,
     [bool]$IncludePdfPagePhotos=$false,
     [bool]$PlainTextPdfConversion=$true,
     [AllowEmptyString()]

@@ -204,8 +204,16 @@ Describe 'Photos destinations and download hash updates' {
         Should -Invoke Set-HuduArticleFromHtml -Times 1
     }
 
-    It 'keeps image article handling by default' {
+    It 'routes supported standalone images to Photos by default' {
         $result = New-HuduArticleFromLocalResource -ResourceLocation $script:localFile -IncludeOriginals $false -DocConversionTempDir $TestDrive
+        $result.PhotoResult.Action | Should -Be Created
+        Should -Invoke New-HuduPhoto -Times 1
+        Should -Invoke Get-HuduArticles -Times 0
+        Should -Invoke Set-HuduArticleFromHtml -Times 0
+    }
+
+    It 'keeps image article handling when Photos is explicitly disabled' {
+        $result = New-HuduArticleFromLocalResource -ResourceLocation $script:localFile -StandaloneImagesAsPhotos $false -IncludeOriginals $false -DocConversionTempDir $TestDrive
         $result.Result.id | Should -Be 80
         Should -Invoke New-HuduPhoto -Times 0
     }
@@ -300,19 +308,19 @@ function New-HuduArticleFromLocalResource {
         }
     }
 
-    It 'defaults both photo options to false' {
+    It 'defaults standalone images to Photos and leaves PDF page photos off' {
         Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
         & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 6>$null
         $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
-        $captured.StandaloneImagesAsPhotos | Should -BeFalse
+        $captured.StandaloneImagesAsPhotos | Should -BeTrue
         $captured.IncludePdfPagePhotos | Should -BeFalse
     }
 
     It 'uses configured photo defaults when parameters are omitted' {
-        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '$StandaloneImagesAsPhotos = $true; $IncludePdfPagePhotos = $true'
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '$StandaloneImagesAsPhotos = $false; $IncludePdfPagePhotos = $true'
         & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 6>$null
         $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
-        $captured.StandaloneImagesAsPhotos | Should -BeTrue
+        $captured.StandaloneImagesAsPhotos | Should -BeFalse
         $captured.IncludePdfPagePhotos | Should -BeTrue
     }
 
