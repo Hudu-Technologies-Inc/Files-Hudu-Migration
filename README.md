@@ -69,6 +69,8 @@ To get the latest CLI, clone or download a zipfile of this repo.
 | **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
 | **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
+| **StandaloneImagesAsPhotos** | Send standalone JPEG, PNG, GIF, WebP and HEIC files to Hudu Photos instead of image articles. Other formats retain existing handling. Default: **false**. |
+| **IncludePdfPagePhotos** | Also publish PDFtoPPM page images to Photos when `PdfMigrationStrategy` is `rasterized`, retaining the PDF article and its embedded pages. Independent of `StandaloneImagesAsPhotos` and `IncludeOriginals`. Default: **false**. |
 | **PdfMigrationStrategy** | PDF conversion mode: `plaintext`, `html`, or `rasterized`. Defaults to `plaintext`. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
@@ -89,6 +91,27 @@ Before each call to `New-HuduArticleFromLocalResource`, the main script resolves
 File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Images listed in `EmbeddableImageExtensions` are embedded in articles. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
 
 Extension lists are normalized before use: values are lowercased, leading dots are added when missing, blank values are ignored, and duplicates are removed.
+
+### Optional Photos destinations
+
+The GUI exposes both Photos options as checkboxes and includes them in saved settings, the run summary, and the generated PowerShell launcher. Existing saved settings default both options to off. The CLI also supports them directly:
+
+```powershell
+.\Files-For-Hudu.ps1 -TargetDocumentDir 'N:\DCIM' -SourceStrategy Recurse `
+    -DestinationStrategy SameCompany -SameCompanyName 'Example Company' `
+    -StandaloneImagesAsPhotos $true -UpdateStrategy filehash
+
+.\Files-For-Hudu.ps1 -TargetDocumentDir 'C:\Documents' -SourceStrategy Recurse `
+    -DestinationStrategy GlobalKB -PdfMigrationStrategy rasterized -IncludePdfPagePhotos $true
+```
+
+Defaults can also be set in `files-config.ps1`. Explicit boolean script parameters, including `$false`, override the config. Photos support requires the HuduAPI fork's `New-HuduPhoto`, `Get-HuduPhotos` (with download support), and `Remove-HuduPhoto` cmdlets. These cmdlets require Hudu 2.41.0+; the migration's existing minimum Hudu version still applies.
+
+Standalone photos use the full source filename as their caption. Rendered PDF pages use `<PDF filename> - <page filename>`, preventing pages from different PDF names from matching each other. Matching uses the exact caption (case-insensitive) within the selected company's gallery, or global Photos when using `GlobalKB`. Photos attached to other records are excluded. Keep filenames unique within a destination; ambiguous duplicate captions cause an error instead of replacing an arbitrary photo. Directory resources and images extracted by HTML/Office conversion keep their article handling.
+
+Photo updates respect `updateFilesOnMatch` and `UpdateStrategy`. `filehash` downloads the matched photo and compares SHA-256, skips identical bytes, and replaces different bytes only when the source is newer than the remote photo plus `DateCompareJitterHours` (12 hours by default), matching the existing article attachment policy. `date` uses source versus destination timestamps. `none` or disabled updates retain matched photos while still allowing new photos. PDF page comparisons use the original PDF's modification time, not the newly rendered PNG timestamps.
+
+Hudu photo metadata updates cannot replace image bytes. A replacement creates and verifies a new photo before deleting the old one; its ID changes, and folder/pinned values are retained. Failed downloads or uploads preserve the old photo. A failed deletion reports the duplicate IDs for resolution. Enabling PDF page photos also works when the existing PDF article is skipped as unchanged. Disabling either option stops publishing those photos; it does not remove existing photos or articles created in earlier runs.
 
 
 ---

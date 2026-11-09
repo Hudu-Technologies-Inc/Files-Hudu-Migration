@@ -34,4 +34,8 @@ $SkipEntirely = [System.Collections.ArrayList]@(
 $ConvertExtensions = @()
 $UploadAsArticleExtensions = @()
 
+# Optional Photos destinations. Explicit script parameters (including false) override these defaults.
+$StandaloneImagesAsPhotos = $false
+$IncludePdfPagePhotos = $false
+
 $script:DateCompareJitterHours = [timespan]::FromHours(12)

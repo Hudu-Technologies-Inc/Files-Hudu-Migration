@@ -924,14 +924,17 @@ function Get-HTMLFromPDFRasterized {
   param(
     [Parameter(Mandatory)][string]$InputPdfPath,
     [string]$PdfToPpmPath,
-    [int]$ResolutionDpi = 144
+    [int]$ResolutionDpi = 144,
+    [string]$OutputDir
   )
 
   if (-not (Test-Path -LiteralPath $InputPdfPath -PathType Leaf)) {
     throw "PDF not found: $InputPdfPath"
   }
 
-  $OutputDir = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+  if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+    $OutputDir = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+  }
   [IO.Directory]::CreateDirectory($OutputDir) | Out-Null
 
   if (-not $PdfToPpmPath -or -not (Test-Path -LiteralPath $PdfToPpmPath)) {
@@ -1022,7 +1025,11 @@ function Set-HuduArticleFromPDF {
     [bool]$PlainTextConversion = $true,
     [AllowEmptyString()]
     [ValidateSet('','plaintext','html','rasterized')]
-    [string]$PdfMigrationStrategy = ''
+    [string]$PdfMigrationStrategy = '',
+    [bool]$IncludePdfPagePhotos = $false,
+    [bool]$UpdateOnMatch = $true,
+    [ValidateSet('date','filehash','none')][string]$UpdateStrategy = 'filehash',
+    [object]$RasterizedPdfData
   )
 
     $null = Get-EnsuredPath -Path $DocConversionTempDir
@@ -1049,11 +1056,25 @@ function Set-HuduArticleFromPDF {
   $pdfData = switch ($effectivePdfMigrationStrategy) {
     'plaintext' { Get-HTMLFromPDFPlainText -InputPdfPath $PdfPath; break }
     'html' { Get-HTMLAndImagesArrayFromPDF -InputPdfPath $PdfPath; break }
-    'rasterized' { Get-HTMLFromPDFRasterized -InputPdfPath $PdfPath; break }
+    'rasterized' {
+      if ($null -ne $RasterizedPdfData) { $RasterizedPdfData } else { Get-HTMLFromPDFRasterized -InputPdfPath $PdfPath }
+      break
+    }
     default { throw "Unsupported PDF migration strategy: $effectivePdfMigrationStrategy" }
   }
 
   $displayTitle = if ($Title) { $Title } else { $pdfBaseName }
+  $pagePhotos = @()
+  if ($IncludePdfPagePhotos -and $effectivePdfMigrationStrategy -eq 'rasterized') {
+    $photoCompanyId = 0
+    if ($CompanyName) {
+      $photoCompany = Unwrap-HuduResultObject -InputObject (ChoseBest-ByName -Name $CompanyName -choices (Get-HuduCompanies)) -WrapperNames @('company')
+      if (-not $photoCompany) { throw "Cannot resolve Photos destination company '$CompanyName'." }
+      $photoCompanyId = [int](Get-HuduObjectId -InputObject $photoCompany)
+    }
+    $pagePhotos = @(Sync-HuduPdfPagePhotos -PdfPath $PdfPath -PdfData $pdfData -CompanyId $photoCompanyId `
+        -UpdateOnMatch $UpdateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours)
+  }
 
   if ($MaxHtmlCharacters -gt 0 -and $pdfData.Html.Length -gt $MaxHtmlCharacters) {
     $matchedCompany = $null
@@ -1102,6 +1123,7 @@ function Set-HuduArticleFromPDF {
       Unresolved  = @()
       OriginalUpload = $upload
       OriginalUploadInfo = $uploadInfo
+      PdfPagePhotos = $pagePhotos
     }
   }
 
@@ -1111,6 +1133,7 @@ function Set-HuduArticleFromPDF {
               -Title        $displayTitle `
               -HtmlContents $pdfData.Html `
               -HuduBaseUrl  (Get-HuduBaseURL) -calculatehashes ([bool]$($CalculateHashes -and $script:CurrentHuduVersion -ge [version]'2.41.0'))
+  $newDoc | Add-Member -MemberType NoteProperty -Name PdfPagePhotos -Value $pagePhotos -Force
 
   if ($true -eq $includeOriginal){
     $uploadInfo = Ensure-HuduArticleUploadForFile `
@@ -1504,6 +1527,8 @@ function New-HuduArticleFromLocalResource {
     [bool]$updateOnMatch=$true,
     [ValidateSet('date','filehash','none')][string]$UpdateStrategy='filehash',
     [bool]$includeOriginals=$true,
+    [bool]$StandaloneImagesAsPhotos=$false,
+    [bool]$IncludePdfPagePhotos=$false,
     [bool]$PlainTextPdfConversion=$true,
     [AllowEmptyString()]
     [ValidateSet('','plaintext','html','rasterized')]
@@ -1531,9 +1556,12 @@ function New-HuduArticleFromLocalResource {
         Company=$null; Result=$null; Action=$null; Error=$null; Global=$null; IsPDF = $null; IsImage = $null; IsEmbedUploadMedia = $null; EmbedUploadMediaKind = $null; Results = $null; FileHash = $null; AllowedToConvertFile = $null; OriginalName = $null; ShouldConvert = $null; MatchedDoc = $null; IsGlobalKB = $null; ArticleResult = $null; Strategy = $null; SourceLastModified = $null; IsDirectory=$null; Images = @(); OriginalEXT = $null; loggedMessages = @(); OutputDir = $null; HTMLPath = $null; HtmlCharacterCount = $null; isScript =$null;
         attachmentStatus = "No attachment info yet."; AttachmentHashInfo = $null; LocalAttachmentNewer = $null; RemoteAttachmentUTCdate = $null; ContentHashInfo = $null; ContentHash = $null; RemoteContentHash = $null; LocalContentNewer = $null; RemoteArticleUTCdate = $null;
         NewDoc = $null; OriginalDoc = $null; Upload = $null; CalculateEmbedHashes = ([bool]($script:CurrentHuduVersion -ge [version]("2.41.0")))
+        PhotoResult = $null; PdfPagePhotos = @()
     }
+    $results.RequestParams.StandaloneImagesAsPhotos = $StandaloneImagesAsPhotos
+    $results.RequestParams.IncludePdfPagePhotos = $IncludePdfPagePhotos
 
-    if (([string]::IsNullOrWhiteSpace($resourceLocation)) -or -not $(test-path $resourceLocation)){
+    if (([string]::IsNullOrWhiteSpace($resourceLocation)) -or -not $(Test-Path -LiteralPath $resourceLocation)){
         $results.Error= "resource location $resourceLocation does not appear to be a valid path"; Write-Warning $results.Error; 
         return $results
     }
@@ -1548,7 +1576,6 @@ function New-HuduArticleFromLocalResource {
     }
     Write-Info "$(if ($results.IsGlobalKB) {'Global KB'} else {"Company '$targetCompanyName' KB"}) will be target for this article"
 
-    $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $targetCompanyId})
     $results.OriginalDoc = Get-Item -LiteralPath $resourceLocation
     $results.originalExt  = [IO.Path]::GetExtension($results.OriginalDoc.Name).ToLowerInvariant()
     $results.originalName = [IO.Path]::GetFileNameWithoutExtension($results.OriginalDoc.Name)    
@@ -1579,6 +1606,28 @@ function New-HuduArticleFromLocalResource {
     $results.IsEmbedUploadMedia = -not [string]::IsNullOrWhiteSpace($results.EmbedUploadMediaKind)
     $results.isScript     = ($results.originalExt -in @(".sh", ".expect", ".ps1", ".bat", ".cmd", ".py", ".js", ".vbs", ".wsf", ".psm1", ".psd1"))
     $results.FileHash     = "$($(Get-FileHash -LiteralPath $results.OriginalDoc.FullName -Algorithm SHA256).Hash)"
+
+    if ($StandaloneImagesAsPhotos -and (Test-HuduPhotoSupportedFile -Path $results.OriginalDoc.FullName)) {
+        if ($companyName -and -not $results.Company) { throw "Cannot resolve Photos destination company '$companyName'." }
+        $results.Strategy = 'Processing standalone picture in Hudu Photos'
+        $results.PhotoResult = Sync-HuduPhotoFromFile -FilePath $results.OriginalDoc.FullName -CompanyId ([int]$targetCompanyId) `
+            -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours
+        $results.Action = $results.PhotoResult.Action
+        $results.Result = $results.PhotoResult.Photo
+        return $results
+    }
+
+    $rasterizedPdfData = $null
+    $effectivePdfStrategy = if ($PdfMigrationStrategy) { $PdfMigrationStrategy } elseif ($PlainTextPdfConversion) { 'plaintext' } else { 'html' }
+    if ($results.isPdf -and $IncludePdfPagePhotos -and $effectivePdfStrategy -eq 'rasterized') {
+        if ($companyName -and -not $results.Company) { throw "Cannot resolve Photos destination company '$companyName'." }
+        # Sync gallery pages even when the original PDF attachment causes an article update to be skipped.
+        $rasterizedPdfData = Get-HTMLFromPDFRasterized -InputPdfPath $results.OriginalDoc.FullName `
+            -OutputDir (Join-Path $DocConversionTempDir "pdf-pages-$([guid]::NewGuid())")
+        $results.PdfPagePhotos = @(Sync-HuduPdfPagePhotos -PdfPath $results.OriginalDoc.FullName -PdfData $rasterizedPdfData `
+            -CompanyId ([int]$targetCompanyId) -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours)
+    }
+    $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $targetCompanyId})
 
     function Test-ArticleNeedsContentRebuild {
         param([object]$Article)
@@ -1803,7 +1852,7 @@ function New-HuduArticleFromLocalResource {
     }  elseif ($true -eq $results.isPdf) {
         $results.Strategy = "Processing as singular PDF to convert and attach as Article."; Write-Info -Message $results.Strategy
     # conversion process - pdf [convert to html and attach graphics]
-        $pdfArticleResult = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters -PlainTextConversion $PlainTextPdfConversion -PdfMigrationStrategy $PdfMigrationStrategy
+        $pdfArticleResult = Set-HuduArticleFromPDF -PdfPath $results.OriginalDoc.FullName -CompanyName $(if ($true -eq $results.IsGlobalKB) {''} else {$CompanyName}) -Title $results.originalName -includeOriginal $includeOriginals -CalculateHashes $results.CalculateEmbedHashes -MaxHtmlCharacters $MaxHtmlCharacters -PlainTextConversion $PlainTextPdfConversion -PdfMigrationStrategy $PdfMigrationStrategy -RasterizedPdfData $rasterizedPdfData
         $pdfUploadInfo = Get-ObjectPropertyValue -InputObject $pdfArticleResult -Names @('OriginalUploadInfo')
         if ($pdfUploadInfo) {
             $results.Upload = $pdfUploadInfo.Upload
@@ -2685,12 +2734,12 @@ function Compare-HuduRemoteFileHashWithFile {
         [object]$RemoteId,
 
         [Parameter(Mandatory)]
-        [ValidateScript({ Test-Path $_ -PathType Leaf })]
+        [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
         [Alias('path','file','localpath','filepath')]
         [string]$LocalFile,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Upload','PublicPhoto')]
+        [ValidateSet('Upload','PublicPhoto','Photo')]
         [string]$MediaKind
     )
 
@@ -2699,17 +2748,20 @@ function Compare-HuduRemoteFileHashWithFile {
     try {
         $remoteEntry = if ($MediaKind -eq 'PublicPhoto') {
             Get-HuduPublicPhotos -Download -Id $RemoteId -OutDir $tempDir
+        } elseif ($MediaKind -eq 'Photo') {
+            Get-HuduPhotos -Download -Id ([int]$RemoteId) -OutDir $tempDir -ErrorAction Stop
         } else {
             Get-HuduUploads -Download -Id ([int]$RemoteId) -OutDir $tempDir
         }
-        $remoteEntry = Unwrap-HuduResultObject -InputObject $remoteEntry -WrapperNames @('Upload', 'upload', 'public_photo', 'PublicPhoto')
-        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path $LocalFile).Path       -Algorithm SHA256).Hash
+        $remoteEntry = Unwrap-HuduResultObject -InputObject $remoteEntry -WrapperNames @('Upload', 'upload', 'public_photo', 'PublicPhoto', 'photo')
+        $localHash  = (Get-FileHash -LiteralPath (Resolve-Path -LiteralPath $LocalFile).Path -Algorithm SHA256).Hash
         $remoteLocalPath = Get-ObjectPropertyValue -InputObject $remoteEntry -Names @('LocalPath', 'local_path', 'localPath')
         if ([string]::isnullorempty($remoteLocalPath) -or [string]::isnullorempty($localHash)){
+            if ($MediaKind -eq 'Photo') { throw "Could not download photo $RemoteId for hash comparison; the existing photo has been retained." }
             return @{SameFile = $false; LocalHash = $localHash; RemoteHash = $null; UploadHash = $null }
         }
 
-        $remoteHash = (Get-FileHash -LiteralPath (Resolve-Path $remoteLocalPath).Path -Algorithm SHA256).Hash
+        $remoteHash = (Get-FileHash -LiteralPath (Resolve-Path -LiteralPath $remoteLocalPath).Path -Algorithm SHA256).Hash
         $samefile = [bool]$("$remoteHash" -ieq "$localHash")
         if ($false -eq $samefile) {
             write-verbose "Hash mismatch between local file and existing $MediaKind (RemoteId: $RemoteId). Local: $localHash, Remote: $remoteHash"
