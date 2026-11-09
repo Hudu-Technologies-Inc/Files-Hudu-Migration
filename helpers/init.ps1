@@ -230,12 +230,14 @@ function Resolve-ResourceConversionPreferences {
         ExplicitConvert = $isExplicitConvert
     }
 }
+
 function Set-HuduModuleInitialized {
     param (
             [string]$HAPImodulePath = "C:\Users\$env:USERNAME\Documents\GitHub\HuduAPI\HuduAPI\HuduAPI.psm1",
             [bool]$use_hudu_fork = $true,
+            [bool]$RefreshHuduApiForkEachRun = $true,
             [version]$RequiredHuduVersion = [version]"2.50.0",
-            $DisallowedVersions = @([version]"2.37.0"),
+            [version[]]$DisallowedVersions = @([version]"2.37.0"),
             [string]$HuduApiRepositoryUrl = $($env:HUDUAPI_REPOSITORY_URL ?? "https://github.com/Hudu-Technologies-Inc/HuduAPI.git"),
             [string]$HuduApiBranch = $($env:HUDUAPI_REPOSITORY_BRANCH ?? "master"),
             [string]$HuduApiZipUrl = $env:HUDUAPI_ZIP_URL,
@@ -245,7 +247,7 @@ function Set-HuduModuleInitialized {
                 ) 'HAPI.zip'
             ),
             [string]$HuduBaseURL,
-            [string]$HuduAPIKey
+            [string]$HuduAPIKey            
         )
     $AllowHuduGalleryFallback = $false
 
@@ -453,9 +455,18 @@ function Set-HuduModuleInitialized {
 
         New-Item -ItemType Directory -Path $targetParent -Force -ErrorAction Stop | Out-Null
         if (Test-Path -LiteralPath $targetRepoRoot) {
-            $backupPath = "$targetRepoRoot.backup-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            $backupPath = if (Test-HuduApiModuleLayout -ModulePath $ModulePath) {
+                "$targetRepoRoot.previous"
+            } else {
+                "$targetRepoRoot.backup-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            }
+
+            if (Test-Path -LiteralPath $backupPath) {
+                Remove-Item -LiteralPath $backupPath -Recurse -Force -ErrorAction SilentlyContinue
+            }
+
             Move-Item -LiteralPath $targetRepoRoot -Destination $backupPath -Force -ErrorAction Stop
-            Write-Warning "Existing incomplete HuduAPI path was moved to $backupPath."
+            Write-Host "Existing HuduAPI path was moved to $backupPath before refresh." -ForegroundColor DarkGray
         }
 
         $stagingGitPath = Join-Path $stagingRepoRoot ".git"
@@ -494,9 +505,18 @@ function Set-HuduModuleInitialized {
     }
 
     if ($true -eq $use_hudu_fork) {
-        if (-not (Test-HuduApiModuleLayout -ModulePath $HAPImodulePath)) {
-            Write-Host "Using latest $HuduApiBranch branch of HuduAPI fork." -ForegroundColor Cyan
+        $hasCompleteLocalFork = Test-HuduApiModuleLayout -ModulePath $HAPImodulePath
+        if ($RefreshHuduApiForkEachRun -or -not $hasCompleteLocalFork) {
+            $refreshReason = if ($RefreshHuduApiForkEachRun) {
+                "Refreshing local HuduAPI fork from the latest $HuduApiBranch branch."
+            } else {
+                "No complete local HuduAPI fork found. Downloading the latest $HuduApiBranch branch."
+            }
+
+            Write-Host $refreshReason -ForegroundColor Cyan
             Install-HuduApiFork -ModulePath $HAPImodulePath -RepositoryUrl $HuduApiRepositoryUrl -Branch $HuduApiBranch -ZipUrl $HuduApiZipUrl -BundledZipPath $BundledHuduApiZipPath
+        } else {
+            Write-Host "Using existing HuduAPI fork at $HAPImodulePath." -ForegroundColor DarkGray
         }
     } else {
         Write-Host "HuduAPI fork loading is disabled. PSGallery will only be used if AllowHuduGalleryFallback is true."
@@ -529,6 +549,7 @@ function Set-HuduModuleInitialized {
 
     return $CurrentVersion
 }
+
 function Get-PSVersionCompatible {
     param (
         [version]$RequiredPSversion = [version]"7.5.1"
