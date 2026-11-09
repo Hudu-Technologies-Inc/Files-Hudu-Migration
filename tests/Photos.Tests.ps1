@@ -37,6 +37,7 @@ Describe 'Photos destinations and download hash updates' {
         $script:uploadFails = $false
         $script:uploadEmpty = $false
         $script:deleteFails = $false
+        $script:nextPhotoId = 21
         $script:events = [Collections.Generic.List[string]]::new()
         Mock Get-HuduPhotos {
             if (-not $Download) { return [pscustomobject]@{ photos = $script:remotePhotos } }
@@ -49,7 +50,8 @@ Describe 'Photos destinations and download hash updates' {
             $script:events.Add('create')
             if ($script:uploadFails) { throw 'Upload failed' }
             if ($script:uploadEmpty) { return $null }
-            [pscustomobject]@{ photo = [pscustomobject]@{ id = 22; caption = $Caption; company_id = $CompanyId } }
+            $script:nextPhotoId++
+            [pscustomobject]@{ photo = [pscustomobject]@{ id = $script:nextPhotoId; caption = $Caption; company_id = $CompanyId } }
         }
         Mock Remove-HuduPhoto { $script:events.Add('delete'); return (-not $script:deleteFails) }
         Mock Get-HuduCompanies { [pscustomobject]@{ id = 7; name = 'Example' } }
@@ -218,6 +220,95 @@ Describe 'Photos destinations and download hash updates' {
         Should -Invoke New-HuduPhoto -Times 0
     }
 
+    Context 'Batch gallery cache' {
+        It 'fetches once and indexes newly created captions case-insensitively' {
+            $cache = @{}
+            $first = Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache
+            $second = Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -Caption 'PICTURE.PNG' -UpdateStrategy none -PhotoCache $cache
+            $third = Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -Caption 'another.png' -PhotoCache $cache
+            $first.Action | Should -Be Created
+            $second.Action | Should -Be Skipped
+            $second.Photo.id | Should -Be $first.Photo.id
+            $third.Photo.id | Should -Not -Be $first.Photo.id
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 2 -Exactly
+        }
+
+        It 'reuses an initially populated destination index' {
+            $script:remotePhotos = @(New-TestPhoto)
+            $cache = @{}
+            1..3 | ForEach-Object {
+                (Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache).HashInfo.SameFile | Should -BeTrue
+            }
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke Get-HuduPhotos -Times 3 -Exactly -ParameterFilter { $Download }
+            Should -Invoke New-HuduPhoto -Times 0
+        }
+
+        It 'keeps company and global captions separate within a batch' {
+            $cache = @{}
+            foreach ($companyId in @(7, 8, 0)) {
+                (Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId $companyId -PhotoCache $cache).Action | Should -Be Created
+            }
+            foreach ($companyId in @(0, 8, 7)) {
+                (Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId $companyId -UpdateStrategy none -PhotoCache $cache).Action | Should -Be Skipped
+            }
+            Should -Invoke Get-HuduPhotos -Times 3 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 3 -Exactly
+        }
+
+        It 'uses the new photo ID after a successful replacement' {
+            $script:remotePhotos = @(New-TestPhoto)
+            $script:remoteBytes = [byte[]](9)
+            $cache = @{}
+            $first = Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache
+            $second = Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -UpdateStrategy none -PhotoCache $cache
+            $first.Action | Should -Be Replaced
+            $second.Photo.id | Should -Be 22
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke Remove-HuduPhoto -Times 1 -Exactly
+        }
+
+        It 'refreshes an uncertain destination after an upload failure' {
+            $cache = @{}
+            $script:uploadFails = $true
+            { Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache } | Should -Throw '*Upload failed*'
+            $script:remotePhotos = @(New-TestPhoto -Id 33)
+            $script:uploadFails = $false
+            (Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -UpdateStrategy none -PhotoCache $cache).Photo.id | Should -Be 33
+            Should -Invoke Get-HuduPhotos -Times 2 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 1 -Exactly
+        }
+
+        It 'refreshes and reports duplicate captions after a failed deletion' {
+            $script:remotePhotos = @(New-TestPhoto)
+            $script:remoteBytes = [byte[]](9)
+            $script:deleteFails = $true
+            $cache = @{}
+            { Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache } | Should -Throw '*old photo 11*'
+            $script:remotePhotos = @((New-TestPhoto), (New-TestPhoto -Id 22))
+            { Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -PhotoCache $cache } | Should -Throw '*Multiple photos*'
+            Should -Invoke Get-HuduPhotos -Times 2 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 1 -Exactly
+        }
+
+        It 'does not retain a cache between independent helper calls' {
+            Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 | Out-Null
+            $script:remotePhotos = @(New-TestPhoto -Id 33)
+            (Sync-HuduPhotoFromFile -FilePath $script:localFile -CompanyId 7 -UpdateStrategy none).Photo.id | Should -Be 33
+            Should -Invoke Get-HuduPhotos -Times 2 -Exactly -ParameterFilter { -not $Download }
+        }
+
+        It 'passes the batch cache through standalone resource handling' {
+            $cache = @{}
+            New-HuduArticleFromLocalResource -ResourceLocation $script:localFile -PhotoCache $cache -DocConversionTempDir $TestDrive | Out-Null
+            $second = New-HuduArticleFromLocalResource -ResourceLocation $script:localFile -PhotoCache $cache -UpdateStrategy none -DocConversionTempDir $TestDrive
+            $second.PhotoResult.Action | Should -Be Skipped
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 1 -Exactly
+        }
+    }
+
     Context 'Rasterized PDF page photos' {
         BeforeEach {
             $script:pdfPath = Join-Path $TestDrive 'manual.pdf'
@@ -265,6 +356,26 @@ Describe 'Photos destinations and download hash updates' {
             $result.PdfPagePhotos.Count | Should -Be 1
             Should -Invoke New-HuduPhoto -Times 1 -ParameterFilter { $CompanyId -eq 7 -and $Caption -eq 'manual.pdf - page-01.png' }
         }
+
+        It 'fetches one gallery for all pages of a direct PDF helper call' {
+            $page2 = Join-Path $TestDrive 'page-02.png'
+            [IO.File]::WriteAllBytes($page2, [byte[]](4, 5, 6))
+            $script:pdfData.Images += $page2
+            $result = Set-HuduArticleFromPDF -PdfPath $script:pdfPath -IncludePdfPagePhotos $true -PdfMigrationStrategy rasterized -IncludeOriginal $false
+            $result.PdfPagePhotos.Count | Should -Be 2
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 2 -Exactly
+        }
+
+        It 'shares the batch gallery across separately processed PDFs' {
+            $cache = @{}
+            New-HuduArticleFromLocalResource -ResourceLocation $script:pdfPath -PhotoCache $cache -IncludePdfPagePhotos $true -PdfMigrationStrategy rasterized -UpdateOnMatch $false -IncludeOriginals $false -DisallowedForConvert @() -DocConversionTempDir $TestDrive | Out-Null
+            $otherPdf = Join-Path $TestDrive 'another-manual.pdf'
+            Set-Content -LiteralPath $otherPdf -Value 'Second PDF fixture'
+            New-HuduArticleFromLocalResource -ResourceLocation $otherPdf -PhotoCache $cache -IncludePdfPagePhotos $true -PdfMigrationStrategy rasterized -UpdateOnMatch $false -IncludeOriginals $false -DisallowedForConvert @() -DocConversionTempDir $TestDrive | Out-Null
+            Should -Invoke Get-HuduPhotos -Times 1 -Exactly -ParameterFilter { -not $Download }
+            Should -Invoke New-HuduPhoto -Times 2 -Exactly
+        }
     }
 }
 
@@ -292,8 +403,11 @@ function Resolve-ResourceConversionPreferences {
 function New-HuduArticleFromLocalResource {
     param($ResourceLocation, $IncludeOriginals, $PlainTextPdfConversion, $PdfMigrationStrategy,
         $StandaloneImagesAsPhotos, $IncludePdfPagePhotos, $DocConversionTempDir,
-        $DisallowedForConvert, $EmbeddableImageExtensions, $UpdateOnMatch, $UpdateStrategy)
-    $PSBoundParameters | Export-Clixml -LiteralPath (Join-Path $WorkDir 'captured.xml')
+        $DisallowedForConvert, $EmbeddableImageExtensions, $UpdateOnMatch, $UpdateStrategy, [hashtable]$PhotoCache)
+    $capture = @{} + $PSBoundParameters
+    $capture.PhotoCacheCountBefore = if ($null -ne $PhotoCache) { $PhotoCache.Count } else { -1 }
+    if ($null -ne $PhotoCache) { $PhotoCache[[IO.Path]::GetFileName($ResourceLocation)] = $true }
+    $capture | Export-Clixml -LiteralPath (Join-Path $WorkDir 'captured.xml')
     [pscustomobject]@{ Status = 'Captured' }
 }
 '@
@@ -332,5 +446,50 @@ function New-HuduArticleFromLocalResource {
         $captured.IncludePdfPagePhotos | Should -BeTrue
         $captured.UpdateStrategy | Should -Be none
         $captured.UpdateOnMatch | Should -BeFalse
+    }
+
+    It 'shares a cache across files and starts with a fresh cache on the next run' {
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
+        Set-Content -LiteralPath (Join-Path $script:inputRoot 'second.png') -Value 'Second image fixture'
+        foreach ($run in 1..2) {
+            & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 6>$null
+            $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
+            $captured.PhotoCacheCountBefore | Should -Be 1
+        }
+    }
+}
+
+Describe 'Rasterized PDF output isolation' {
+    BeforeEach {
+        $script:renderPdf = Join-Path $TestDrive 'render.pdf'
+        $script:fakeRenderer = Join-Path $TestDrive 'pdftoppm.ps1'
+        # Exercise the real renderer wrapper with deterministic pages and no Poppler download.
+        Set-Content -LiteralPath $script:fakeRenderer -Value @'
+$pageCount = [int]([IO.File]::ReadAllText($args[-2]).Trim())
+$prefix = $args[-1]
+foreach ($page in 1..$pageCount) {
+    [IO.File]::WriteAllBytes("$prefix-$page.png", [byte[]](1, 2, 3))
+}
+$global:LASTEXITCODE = 0
+'@
+    }
+
+    It 'isolates repeated renders in one parent directory and preserves previous files' {
+        $parent = Join-Path $TestDrive 'renders'
+        New-Item -ItemType Directory -Path $parent | Out-Null
+        $sentinel = Join-Path $parent 'page-99.png'
+        [IO.File]::WriteAllBytes($sentinel, [byte[]](9))
+        Set-Content -LiteralPath $script:renderPdf -Value '3'
+        $first = Get-HTMLFromPDFRasterized -InputPdfPath $script:renderPdf -PdfToPpmPath $script:fakeRenderer -OutputDir $parent
+        Set-Content -LiteralPath $script:renderPdf -Value '2'
+        $second = Get-HTMLFromPDFRasterized -InputPdfPath $script:renderPdf -PdfToPpmPath $script:fakeRenderer -OutputDir $parent
+        $first.Images.Count | Should -Be 3
+        $second.Images.Count | Should -Be 2
+        $second.Html | Should -Not -Match 'page-3.png|page-99.png'
+        $first.OutputDir | Should -Not -Be $second.OutputDir
+        (Split-Path $first.OutputDir -Parent) | Should -Be $parent
+        (Split-Path $second.OutputDir -Parent) | Should -Be $parent
+        Test-Path -LiteralPath $first.Images[-1] | Should -BeTrue
+        [IO.File]::ReadAllBytes($sentinel)[0] | Should -Be 9
     }
 }

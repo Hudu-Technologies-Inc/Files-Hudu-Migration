@@ -225,6 +225,7 @@ param(
     }
 
     # region: main processing loop
+    $photoCache = @{}
     foreach ($sourceObject in $sourceObjects) {
         try {
             $articleFromResourceRequest = @{
@@ -234,6 +235,7 @@ param(
                 PdfMigrationStrategy = $effectivePdfMigrationStrategy
                 StandaloneImagesAsPhotos = $StandaloneImagesAsPhotos
                 IncludePdfPagePhotos = $IncludePdfPagePhotos
+                PhotoCache = $photoCache
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null

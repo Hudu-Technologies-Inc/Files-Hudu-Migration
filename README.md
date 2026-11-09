@@ -109,6 +109,8 @@ Defaults can also be set in `files-config.ps1`. Explicit boolean script paramete
 
 Standalone photos use the full source filename as their caption. Rendered PDF pages use `<PDF filename> - <page filename>`, preventing pages from different PDF names from matching each other. Matching uses the exact caption (case-insensitive) within the selected company's gallery, or global Photos when using `GlobalKB`. Photos attached to other records are excluded. Keep filenames unique within a destination; ambiguous duplicate captions cause an error instead of replacing an arbitrary photo. Directory resources and images extracted by HTML/Office conversion keep their article handling.
 
+Each migration batch fetches and indexes a destination gallery once, sharing the index across standalone images and PDF pages. Successful creates and replacements update the index; failed mutations invalidate that destination so the next file fetches its current gallery. Every new batch starts with a fresh cache. Direct helper callers can share a `-PhotoCache` hashtable across calls; create a new `@{}` for each batch and Hudu instance. Without a supplied cache, each independent helper call starts fresh, while all pages within a PDF share an index.
+
 Photo updates respect `updateFilesOnMatch` and `UpdateStrategy`. `filehash` downloads the matched photo and compares SHA-256, skips identical bytes, and replaces different bytes only when the source is newer than the remote photo plus `DateCompareJitterHours` (12 hours by default), matching the existing article attachment policy. `date` uses source versus destination timestamps. `none` or disabled updates retain matched photos while still allowing new photos. PDF page comparisons use the original PDF's modification time, not the newly rendered PNG timestamps.
 
 Hudu photo metadata updates cannot replace image bytes. A replacement creates and verifies a new photo before deleting the old one; its ID changes, and folder/pinned values are retained. Failed downloads or uploads preserve the old photo. A failed deletion reports the duplicate IDs for resolution. Enabling PDF page photos also works when the existing PDF article is skipped as unchanged. Disabling either option stops publishing those photos; it does not remove existing photos or articles created in earlier runs.
@@ -156,6 +158,8 @@ If you wanted to upload all eligible .pdf documents in c:\path to a single compa
 ```
 
 By default PDFs use `plaintext`, which runs Poppler `pdftotext` and creates a searchable text article with the original PDF attached. You can also set `-PdfMigrationStrategy html` to use `pdftohtml` and extract HTML/images, or `-PdfMigrationStrategy rasterized` to render every page as a PNG image with `pdftoppm` for maximum visual fidelity.
+
+When calling `Get-HTMLFromPDFRasterized` directly, an explicit `-OutputDir` is a parent directory: each render writes into a fresh child directory. Use the returned `OutputDir` and `Images` values to locate that render's files. Reusing a parent directory preserves previous renders without including their pages in the new result.
 
 <img width="1224" height="448" alt="image" src="https://github.com/user-attachments/assets/e1298f57-0e3e-4903-8425-ccbcafd109a7" />
 

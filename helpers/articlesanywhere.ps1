@@ -934,6 +934,9 @@ function Get-HTMLFromPDFRasterized {
 
   if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+  } else {
+    # Treat the supplied directory as a parent; never mix this render with earlier page files.
+    $OutputDir = Join-Path $OutputDir ([IO.Path]::GetRandomFileName())
   }
   [IO.Directory]::CreateDirectory($OutputDir) | Out-Null
 
@@ -1029,7 +1032,8 @@ function Set-HuduArticleFromPDF {
     [bool]$IncludePdfPagePhotos = $false,
     [bool]$UpdateOnMatch = $true,
     [ValidateSet('date','filehash','none')][string]$UpdateStrategy = 'filehash',
-    [object]$RasterizedPdfData
+    [object]$RasterizedPdfData,
+    [hashtable]$PhotoCache
   )
 
     $null = Get-EnsuredPath -Path $DocConversionTempDir
@@ -1073,7 +1077,7 @@ function Set-HuduArticleFromPDF {
       $photoCompanyId = [int](Get-HuduObjectId -InputObject $photoCompany)
     }
     $pagePhotos = @(Sync-HuduPdfPagePhotos -PdfPath $PdfPath -PdfData $pdfData -CompanyId $photoCompanyId `
-        -UpdateOnMatch $UpdateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours)
+        -UpdateOnMatch $UpdateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours -PhotoCache $PhotoCache)
   }
 
   if ($MaxHtmlCharacters -gt 0 -and $pdfData.Html.Length -gt $MaxHtmlCharacters) {
@@ -1536,7 +1540,8 @@ function New-HuduArticleFromLocalResource {
     [int]$MaxHtmlCharacters=254000,
     [Parameter(Mandatory)][string]$DocConversionTempDir,
     [array]$EmbeddableImageExtensions=@(".jpg", ".jpeg",".png",".gif",".bmp",".webp",".svg",".apng",".avif",".ico",".jfif",".pjpeg",".pjp"),
-    [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc",".rdp",".pjpg",".pfile",".ptxt",".ppt",".pptx", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm",".pdf", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm")
+    [System.Collections.ArrayList]$DisallowedForConvert=[System.Collections.ArrayList]@(".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a",".dll", ".so", ".lib", ".bin", ".class", ".pyc",".rdp",".pjpg",".pfile",".ptxt",".ppt",".pptx", ".pyo", ".o", ".obj",".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".app", ".apk", ".dmg", ".iso", ".img",".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".lz",".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm",".pdf", ".flv",".psd", ".ai", ".eps", ".indd", ".sketch", ".fig", ".xd", ".blend", ".vsdx",".ds_store", ".thumbs", ".lnk", ".heic", ".eml", ".msg", ".esx", ".esxm"),
+    [hashtable]$PhotoCache
   )
     $VerbosePreference = 'Continue'
 
@@ -1611,7 +1616,7 @@ function New-HuduArticleFromLocalResource {
         if ($companyName -and -not $results.Company) { throw "Cannot resolve Photos destination company '$companyName'." }
         $results.Strategy = 'Processing standalone picture in Hudu Photos'
         $results.PhotoResult = Sync-HuduPhotoFromFile -FilePath $results.OriginalDoc.FullName -CompanyId ([int]$targetCompanyId) `
-            -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours
+            -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours -PhotoCache $PhotoCache
         $results.Action = $results.PhotoResult.Action
         $results.Result = $results.PhotoResult.Photo
         return $results
@@ -1623,9 +1628,9 @@ function New-HuduArticleFromLocalResource {
         if ($companyName -and -not $results.Company) { throw "Cannot resolve Photos destination company '$companyName'." }
         # Sync gallery pages even when the original PDF attachment causes an article update to be skipped.
         $rasterizedPdfData = Get-HTMLFromPDFRasterized -InputPdfPath $results.OriginalDoc.FullName `
-            -OutputDir (Join-Path $DocConversionTempDir "pdf-pages-$([guid]::NewGuid())")
+            -OutputDir $DocConversionTempDir
         $results.PdfPagePhotos = @(Sync-HuduPdfPagePhotos -PdfPath $results.OriginalDoc.FullName -PdfData $rasterizedPdfData `
-            -CompanyId ([int]$targetCompanyId) -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours)
+            -CompanyId ([int]$targetCompanyId) -UpdateOnMatch $updateOnMatch -UpdateStrategy $UpdateStrategy -Jitter $script:DateCompareJitterHours -PhotoCache $PhotoCache)
     }
     $companyDocs = $companyDocs ?? $(if ($true -eq $results.IsGlobalKB) {Get-HuduArticles} else {Get-HuduArticles -companyId $targetCompanyId})
 
