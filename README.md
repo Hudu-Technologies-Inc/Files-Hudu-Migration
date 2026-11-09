@@ -13,7 +13,7 @@ It uses the **community-supported [Articles-From-Anything](./Client-Libraries/Ar
 | Component | Required Version |
 |----------|------------------|
 | PowerShell | 7.5.1+ |
-| Hudu | 2.40.2+ |
+| Hudu | 2.50.0+ |
 | Windows | Any |
 | Hudu API Key | — |
 | LibreOffice | Latest MSI* |
