@@ -40,6 +40,12 @@ param(
     [bool]$IncludeOriginals = $true,
 
     [Parameter(Mandatory = $false)]
+    [bool]$StandaloneImagesAsPhotos = $true,
+
+    [Parameter(Mandatory = $false)]
+    [bool]$IncludePdfPagePhotos = $false,
+
+    [Parameter(Mandatory = $false)]
     [bool]$PlainTextPdfConversion = $true,
 
     [Parameter(Mandatory = $false)]
@@ -86,6 +92,10 @@ param(
     $VerbosePreference = 'SilentlyContinue'
     $requestedConvertExtensions = @($ConvertExtensions)
     $requestedUploadAsArticleExtensions = @($UploadAsArticleExtensions)
+    $requestedPhotoOptions = @{}
+    foreach ($option in @('StandaloneImagesAsPhotos', 'IncludePdfPagePhotos')) {
+        if ($PSBoundParameters.ContainsKey($option)) { $requestedPhotoOptions[$option] = $PSBoundParameters[$option] }
+    }
     $ConvertExtensions = $null
     $UploadAsArticleExtensions = $null
     $effectivePdfMigrationStrategy = if ([string]::IsNullOrWhiteSpace($PdfMigrationStrategy)) {
@@ -103,6 +113,9 @@ param(
         . (Join-Path $WorkDir "files-config.ps1")
     } catch {
         Write-Warning "Could not load files-config.ps1; proceeding with defaults and user prompts. Error: $($_.Exception.Message); Not to worry, using sane defaults."
+    }
+    foreach ($option in $requestedPhotoOptions.Keys) {
+        Set-Variable -Name $option -Value $requestedPhotoOptions[$option]
     }
 
     if (-not (Get-Variable -Name EmbeddableImageExtensions -Scope Local -ErrorAction SilentlyContinue) -or $null -eq $EmbeddableImageExtensions) {
@@ -212,6 +225,7 @@ param(
     }
 
     # region: main processing loop
+    $photoCache = @{}
     foreach ($sourceObject in $sourceObjects) {
         try {
             $articleFromResourceRequest = @{
@@ -219,6 +233,9 @@ param(
                 IncludeOriginals = ($IncludeOriginals ?? $true)
                 PlainTextPdfConversion = ($PlainTextPdfConversion ?? $true)
                 PdfMigrationStrategy = $effectivePdfMigrationStrategy
+                StandaloneImagesAsPhotos = $StandaloneImagesAsPhotos
+                IncludePdfPagePhotos = $IncludePdfPagePhotos
+                PhotoCache = $photoCache
             }
             $alternativeTempPath = $(Resolve-Path ([IO.Path]::GetTempPath())).Path
             [IO.Directory]::CreateDirectory($alternativeTempPath) | Out-Null
@@ -272,14 +289,14 @@ param(
                     $articleFromResourceRequest.Remove($paramName)
                 }
             }
-            write-host "article processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
+            write-host "resource processing parameters:`n$($($articleFromResourceRequest | format-list | Out-String))" -ForegroundColor DarkGray
             $result = New-HuduArticleFromLocalResource @articleFromResourceRequest
             $results.Add($result)
 
-            Write-Host "Created article from $($sourceObject.FullName)" -ForegroundColor Green
+            Write-Host "Processed resource from $($sourceObject.FullName)" -ForegroundColor Green
         }
         catch {
-            Write-Warning "Failed to create article from $($sourceObject.FullName): $($_.Exception.Message)"
+            Write-Warning "Failed to process resource from $($sourceObject.FullName): $($_.Exception.Message)"
             $results.Add([pscustomobject]@{
                 Path   = $sourceObject.FullName
                 Error  = $_.Exception.Message

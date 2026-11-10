@@ -13,7 +13,7 @@ It uses the **community-supported [Articles-From-Anything](./Client-Libraries/Ar
 | Component | Required Version |
 |----------|------------------|
 | PowerShell | 7.5.1+ |
-| Hudu | 2.40.2+ |
+| Hudu | 2.50.0+ |
 | Windows | Any |
 | Hudu API Key | — |
 | LibreOffice | Latest MSI* |
@@ -69,6 +69,8 @@ To get the latest CLI, clone or download a zipfile of this repo.
 | **SourceStrategy** | Controls discovery depth: `TopLevel` only scans the first level; `Recurse` scans subdirectories up to `MaxDepth`. Optional; prompts if omitted unless `IncludeDirectories` is used. |
 | **IncludeDirectories** | Treat top-level directories as resources that become directory-listing articles. When enabled, discovery is forced to `TopLevel`. |
 | **IncludeOriginals** | Include original documents in the article along with converted versions. Default: **true**. |
+| **StandaloneImagesAsPhotos** | Send standalone JPEG, PNG, GIF, WebP and HEIC files to Hudu Photos instead of image articles. Set to `false` to create image articles. Other formats retain existing handling. Default: **true**. |
+| **IncludePdfPagePhotos** | Also publish PDFtoPPM page images to Photos when `PdfMigrationStrategy` is `rasterized`, retaining the PDF article and its embedded pages. Independent of `StandaloneImagesAsPhotos` and `IncludeOriginals`. Default: **false**. |
 | **PdfMigrationStrategy** | PDF conversion mode: `plaintext`, `html`, or `rasterized`. Defaults to `plaintext`. |
 | **MaxItems** | Maximum number of files/directories allowed in a batch. Default: **500**. |
 | **MaxTotalBytes** | Maximum allowed total size of incoming documents. Default: **5 GB**. |
@@ -86,9 +88,32 @@ For `ConvertExtensions` and `UploadAsArticleExtensions`, non-empty script parame
 
 Before each call to `New-HuduArticleFromLocalResource`, the main script resolves these preferences into effective `DisallowedForConvert` and `EmbeddableImageExtensions` values for that file. Explicit `UploadAsArticleExtensions` has highest priority. Explicit `ConvertExtensions` is next and can allow an extension even when config-level upload or deny preferences would otherwise block it. Config-level `UploadAsArticleExtensions`, config-level `ConvertExtensions`, and then `DisallowedForConvert` apply after that.
 
-File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Images listed in `EmbeddableImageExtensions` are embedded in articles. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
+File handling order is: `SkipEntirely` removes files from discovery first; size, recursion, and `filter` rules select the batch; then per-file strategy is chosen. Supported standalone images go to Photos by default. When `StandaloneImagesAsPhotos` is `false`, or the image format is unsupported by Photos, images listed in `EmbeddableImageExtensions` are embedded in articles. These image extensions are automatically included in the effective conversion allow-list even when `ConvertExtensions` lists only document types. PDFs use the PDF conversion path. Scripts are rendered as code-style articles. Other files are converted unless blocked by `DisallowedForConvert`, excluded by a non-empty `ConvertExtensions` allow-list, or included in `UploadAsArticleExtensions`.
 
 Extension lists are normalized before use: values are lowercased, leading dots are added when missing, blank values are ignored, and duplicates are removed.
+
+### Optional Photos destinations
+
+The GUI exposes both Photos options as checkboxes and includes them in saved settings, the run summary, and the generated PowerShell launcher. Standalone image Photos is on by default; PDF page Photos remains off. Saved choices are respected, including an explicit off value; settings missing the standalone Photos option use the new default. Uncheck **Add standalone pictures to Hudu Photos**, or set `-StandaloneImagesAsPhotos $false`, to create image articles instead. The CLI also supports them directly:
+
+```powershell
+.\Files-For-Hudu.ps1 -TargetDocumentDir 'N:\DCIM' -SourceStrategy Recurse `
+    -DestinationStrategy SameCompany -SameCompanyName 'Example Company' `
+    -StandaloneImagesAsPhotos $true -UpdateStrategy filehash
+
+.\Files-For-Hudu.ps1 -TargetDocumentDir 'C:\Documents' -SourceStrategy Recurse `
+    -DestinationStrategy GlobalKB -PdfMigrationStrategy rasterized -IncludePdfPagePhotos $true
+```
+
+Defaults can also be set in `files-config.ps1`. Explicit boolean script parameters, including `$false`, override the config. Photos support requires the HuduAPI fork's `New-HuduPhoto`, `Get-HuduPhotos` (with download support), and `Remove-HuduPhoto` cmdlets. These cmdlets require Hudu 2.41.0+; the migration's existing minimum Hudu version still applies.
+
+Standalone photos use the full source filename as their caption. Rendered PDF pages use `<PDF filename> - <page filename>`, preventing pages from different PDF names from matching each other. Matching uses the exact caption (case-insensitive) within the selected company's gallery, or global Photos when using `GlobalKB`. Photos attached to other records are excluded. Keep filenames unique within a destination; ambiguous duplicate captions cause an error instead of replacing an arbitrary photo. Directory resources and images extracted by HTML/Office conversion keep their article handling.
+
+Each migration batch fetches and indexes a destination gallery once, sharing the index across standalone images and PDF pages. Successful creates and replacements update the index; failed mutations invalidate that destination so the next file fetches its current gallery. Every new batch starts with a fresh cache. Direct helper callers can share a `-PhotoCache` hashtable across calls; create a new `@{}` for each batch and Hudu instance. Without a supplied cache, each independent helper call starts fresh, while all pages within a PDF share an index.
+
+Photo updates respect `updateFilesOnMatch` and `UpdateStrategy`. `filehash` downloads the matched photo and compares SHA-256, skips identical bytes, and replaces different bytes only when the source is newer than the remote photo plus `DateCompareJitterHours` (12 hours by default), matching the existing article attachment policy. `date` uses source versus destination timestamps. `none` or disabled updates retain matched photos while still allowing new photos. PDF page comparisons use the original PDF's modification time, not the newly rendered PNG timestamps.
+
+Hudu photo metadata updates cannot replace image bytes. A replacement creates and verifies a new photo before deleting the old one; its ID changes, and folder/pinned values are retained. Failed downloads or uploads preserve the old photo. A failed deletion reports the duplicate IDs for resolution. Enabling PDF page photos also works when the existing PDF article is skipped as unchanged. Disabling either option stops publishing those photos; it does not remove existing photos or articles created in earlier runs.
 
 
 ---
@@ -116,7 +141,7 @@ Extension lists are normalized before use: values are lowercased, leading dots a
 
 #### Adding Articles for Critical PNG images on a Digital Camera
 ```powershell
-. .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png"
+. .\Files-For-Hudu.ps1 -TargetDocumentDir N:\DCIM -SourceStrategy Recurse -Filter "*.png" -StandaloneImagesAsPhotos $false
 ```
 
 ---
@@ -133,6 +158,8 @@ If you wanted to upload all eligible .pdf documents in c:\path to a single compa
 ```
 
 By default PDFs use `plaintext`, which runs Poppler `pdftotext` and creates a searchable text article with the original PDF attached. You can also set `-PdfMigrationStrategy html` to use `pdftohtml` and extract HTML/images, or `-PdfMigrationStrategy rasterized` to render every page as a PNG image with `pdftoppm` for maximum visual fidelity.
+
+When calling `Get-HTMLFromPDFRasterized` directly, an explicit `-OutputDir` is a parent directory: each render writes into a fresh child directory. Use the returned `OutputDir` and `Images` values to locate that render's files. Reusing a parent directory preserves previous renders without including their pages in the new result.
 
 <img width="1224" height="448" alt="image" src="https://github.com/user-attachments/assets/e1298f57-0e3e-4903-8425-ccbcafd109a7" />
 
