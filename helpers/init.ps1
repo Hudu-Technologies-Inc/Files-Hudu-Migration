@@ -237,7 +237,7 @@ function Set-HuduModuleInitialized {
             [bool]$use_hudu_fork = $true,
             [bool]$RefreshHuduApiForkEachRun = $true,
             [string]$HuduApiRepositoryUrl = $($env:HUDUAPI_REPOSITORY_URL ?? "https://github.com/Hudu-Technologies-Inc/HuduAPI.git"),
-            [string]$HuduApiBranch = $($env:HUDUAPI_REPOSITORY_BRANCH ?? "chore/test-websession-contrib-zacgoose"),
+            [string]$HuduApiBranch = $($env:HUDUAPI_REPOSITORY_BRANCH ?? "master"),
             [string]$HuduApiZipUrl = $env:HUDUAPI_ZIP_URL,
             [string]$BundledHuduApiZipPath = (
                 Join-Path (
