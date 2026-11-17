@@ -3032,14 +3032,18 @@ function Export-DocPropertyJson {
     return $outPath
 }
 function Get-EnsuredPath {
+    [CmdletBinding()]
     param([string]$path)
-    $outpath = if (-not $path -or [string]::IsNullOrWhiteSpace($path)) { $(join-path $(Resolve-Path .).path "debug") } else {$path}
-    if (-not (Test-Path $outpath)) {
-        Get-ChildItem -Path "$outpath" -File -Recurse -Force | Remove-Item -Force
-        New-Item -ItemType Directory -Path $outpath -Force -ErrorAction Stop | Out-Null
-        write-verbose "path is now present: $outpath"
-    } else {write-verbose "path is present: $outpath"}
-    return $outpath
+    if ([string]::IsNullOrWhiteSpace($path)) { $path = Join-Path (Get-Location).Path 'debug' }
+    # Resolve against PowerShell's location, which can differ from .NET's current directory.
+    $provider = $null
+    $drive = $null
+    $outpath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw "Directory must be a filesystem path: $path" }
+    # CreateDirectory treats wildcard characters literally and also accepts existing directories.
+    $directory = [IO.Directory]::CreateDirectory($outpath)
+    Write-Verbose "Directory is present: $($directory.FullName)"
+    return $directory.FullName
 }
 
 function Write-ErrorObjectsToFile {

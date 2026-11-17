@@ -144,10 +144,19 @@ param(
     }
 
     # Ensure or prompt for params and directories
-    $null = Get-EnsuredPath -Path $DocConversionTempDir
+    if (-not [string]::IsNullOrWhiteSpace($DocConversionTempDir)) {
+        try {
+            $DocConversionTempDir = Get-EnsuredPath -Path $DocConversionTempDir -ErrorAction Stop
+        } catch {
+            Write-Warning "Cannot use temporary directory '$DocConversionTempDir': $($_.Exception.Message). Using the default Docs-Temp directory."
+            $DocConversionTempDir = $null
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($DocConversionTempDir)) {
+        $DocConversionTempDir = Get-EnsuredPath -Path (Join-Path $WorkDir 'Docs-Temp') -ErrorAction Stop
+    }
     if (-not $TargetDocumentDir) {$TargetDocumentDir = Read-Host "Which directory contains documents"}
     if (-not (Test-Path -LiteralPath $TargetDocumentDir)) {throw "Target document directory '$TargetDocumentDir' does not exist."}
-    if (-not $DocConversionTempDir) {$DocConversionTempDir = Join-Path -Path $WorkDir -ChildPath "Docs-Temp"}
     if (-not $HuduBaseUrl) {$HuduBaseUrl = Read-Host "Enter Hudu URL"}
     if (-not $HuduApiKey -and $HuduApiKeyPath) {$HuduApiKey = Read-HuduApiKeyFromTransientFile -Path $HuduApiKeyPath}
     if (-not $HuduApiKey -and $HuduApiKeySecure) {$HuduApiKey = Convert-HuduSecureStringToPlainText -SecureString $HuduApiKeySecure}
