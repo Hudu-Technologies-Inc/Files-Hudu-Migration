@@ -61,7 +61,7 @@ To get the latest CLI, clone or download a zipfile of this repo.
 | Parameter | Description |
 |----------|-------------|
 | **TargetDocumentDir** *(required)* | File or directory containing the articles to process. |
-| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. Defaults to `Docs-Temp` under the project directory. |
+| **DocConversionTempDir** | Temporary directory for PDF/HTML/LibreOffice conversions. Relative paths resolve against the current PowerShell location; missing directories are created. If the supplied path cannot be resolved or created, falls back to `Docs-Temp` under the project directory (also the default when omitted). |
 | **filter** | Case-insensitive file or directory filter. Supports wildcards (e.g., `*.pdf`, `keep*`). |
 | **updateFilesOnMatch** | When `true`, matched existing articles can be updated according to `UpdateStrategy`. When `false`, matched articles are skipped. Default: **true**. |
 | **UpdateStrategy** | Match-update comparison mode: `filehash`, `date`, or `none`. Default: **filehash**. If `updateFilesOnMatch` is `false`, this is forced to `none` for processing. |

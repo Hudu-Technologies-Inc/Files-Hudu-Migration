@@ -379,11 +379,11 @@ Describe 'Photos destinations and download hash updates' {
     }
 }
 
-Describe 'CLI Photos option precedence and forwarding' {
+Describe 'CLI option precedence, forwarding and temporary directories' {
     BeforeEach {
-        $script:driverRoot = Join-Path $TestDrive 'driver'
+        $script:driverRoot = Join-Path $TestDrive ('driver-' + [guid]::NewGuid().ToString())
         $helpers = Join-Path $script:driverRoot 'helpers'
-        $script:inputRoot = Join-Path $TestDrive 'input'
+        $script:inputRoot = Join-Path $script:driverRoot 'input'
         New-Item -ItemType Directory -Path $helpers, $script:inputRoot -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $repoRoot 'Files-For-Hudu.ps1') -Destination $script:driverRoot
         Set-Content -LiteralPath (Join-Path $script:inputRoot 'picture.png') -Value 'fixture'
@@ -411,6 +411,8 @@ function New-HuduArticleFromLocalResource {
     [pscustomobject]@{ Status = 'Captured' }
 }
 '@
+        # Keep directory handling real so CLI tests cover path resolution and fallback.
+        Add-Content -LiteralPath (Join-Path $helpers 'capture.ps1') -Value "function Get-EnsuredPath { $((Get-Command Get-EnsuredPath).Definition) }"
         $script:driverArgs = @{
             TargetDocumentDir = $script:inputRoot
             DocConversionTempDir = (Join-Path $TestDrive 'conversion')
@@ -456,6 +458,58 @@ function New-HuduArticleFromLocalResource {
             $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
             $captured.PhotoCacheCountBefore | Should -Be 1
         }
+    }
+
+    It 'creates a literal relative temp directory usable by .NET from a different working directory' {
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
+        $script:driverArgs.DocConversionTempDir = '.\temp[1]\nested'
+        Push-Location -LiteralPath $script:inputRoot
+        try {
+            (Get-Location).Path | Should -Not -Be ([Environment]::CurrentDirectory)
+            & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 6>$null
+            $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
+            $expected = Join-Path $script:inputRoot 'temp[1]\nested'
+            $captured.DocConversionTempDir | Should -Be $expected
+            Test-Path -LiteralPath $expected -PathType Container | Should -BeTrue
+            $probe = Join-Path $captured.DocConversionTempDir 'probe.txt'
+            [IO.File]::WriteAllText($probe, 'readable')
+            [IO.File]::ReadAllText($probe) | Should -Be 'readable'
+        } finally { Pop-Location }
+    }
+
+    It 'falls back to the default when a file prevents creation of the supplied directory' {
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
+        $blockingFile = Join-Path $TestDrive 'blocking-file'
+        Set-Content -LiteralPath $blockingFile -Value 'keep me'
+        $script:driverArgs.DocConversionTempDir = Join-Path $blockingFile 'nested'
+        $warnings = @()
+        & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs -WarningVariable warnings 3>$null 6>$null
+        $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
+        $captured.DocConversionTempDir | Should -Be (Join-Path $script:driverRoot 'Docs-Temp')
+        Test-Path -LiteralPath $captured.DocConversionTempDir -PathType Container | Should -BeTrue
+        ($warnings -join ' ') | Should -Match 'Using the default Docs-Temp directory'
+        Get-Content -LiteralPath $blockingFile | Should -Be 'keep me'
+    }
+
+    It 'creates the default directory when the argument is omitted or blank' -TestCases @(
+        @{ Omit = $true }, @{ Omit = $false }
+    ) {
+        param($Omit)
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
+        if ($Omit) { $script:driverArgs.Remove('DocConversionTempDir') } else { $script:driverArgs.DocConversionTempDir = ' ' }
+        & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 6>$null
+        $captured = Import-Clixml -LiteralPath (Join-Path $script:driverRoot 'captured.xml')
+        $captured.DocConversionTempDir | Should -Be (Join-Path $script:driverRoot 'Docs-Temp')
+        Test-Path -LiteralPath $captured.DocConversionTempDir -PathType Container | Should -BeTrue
+    }
+
+    It 'stops before processing when the default directory cannot be created either' {
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'files-config.ps1') -Value '# no overrides'
+        $script:driverArgs.DocConversionTempDir = Join-Path $TestDrive 'blocked\nested'
+        Set-Content -LiteralPath (Join-Path $TestDrive 'blocked') -Value 'file'
+        Set-Content -LiteralPath (Join-Path $script:driverRoot 'Docs-Temp') -Value 'file'
+        { & (Join-Path $script:driverRoot 'Files-For-Hudu.ps1') @script:driverArgs 3>$null 6>$null } | Should -Throw
+        Test-Path -LiteralPath (Join-Path $script:driverRoot 'captured.xml') | Should -BeFalse
     }
 }
 
